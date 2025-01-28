@@ -6,7 +6,10 @@ import asyncio
 
 load_dotenv()
 
-bot = commands.Bot(command_prefix="k.", intents=discord.Intents.all())
+bot = commands.Bot(command_prefix="k.",
+                   intents=discord.Intents.all(),
+                   allowed_contexts=discord.app_commands.AppCommandContext(guild=True, dm_channel=True, private_channel=True)
+                   )
 
 @bot.event
 async def on_ready():

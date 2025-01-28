@@ -35,7 +35,7 @@ class Chatbot(commands.Cog):
             # Fetch channel history
             history = await self.fetch_channel_history(self.CHANNEL_ID)
             self.chat = self.model.start_chat(history=history)
-            print(f"{self.__class__.__name__} is online!")
+            print(f"{__name__} is online!")
         except Exception as e:
             print(f"Error during on_ready: {e}")
 
@@ -84,7 +84,7 @@ class Chatbot(commands.Cog):
                     parts = f"{message.author.name} ({message.author.display_name}): {message.content}"
 
                 history.append({"role": role, "parts": parts})
-                print({"role": role, "parts": parts})
+                # print({"role": role, "parts": parts})
 
             return history
         except Exception as e:

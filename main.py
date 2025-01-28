@@ -3,10 +3,13 @@ from discord.ext import commands
 from dotenv import load_dotenv
 import os
 import asyncio
+from keep_alive import keep_alive
 
 load_dotenv()
+keep_alive()
 
 bot = commands.Bot(command_prefix="k.", intents=discord.Intents.all())
+
 
 @bot.event
 async def on_ready():
@@ -17,15 +20,18 @@ async def on_ready():
     except Exception as e:
         print("An error while syncing application commands has occured: ", e)
 
+
 async def load():
     for file in os.listdir('./cogs'):
         if file.endswith('.py'):
             await bot.load_extension(f"cogs.{file[:-3]}")
 
+
 async def main():
     async with bot:
         await load()
-        await bot.start(os.getenv('TOKEN'))
+        await bot.start(os.environ['TOKEN'])
+
 
 if __name__ == "__main__":
     asyncio.run(main())

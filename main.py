@@ -8,7 +8,10 @@ from keep_alive import keep_alive
 load_dotenv()
 keep_alive()
 
-bot = commands.Bot(command_prefix="k.", intents=discord.Intents.all())
+bot = commands.Bot(command_prefix="k.",
+                   intents=discord.Intents.all(),
+                   allowed_contexts=discord.app_commands.AppCommandContext(guild=True, dm_channel=True, private_channel=True)
+                   )
 
 
 @bot.event

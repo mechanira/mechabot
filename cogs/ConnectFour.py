@@ -2,144 +2,157 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 import random
-import os
+import sqlite3
+import json
 
 def winCheck(grid) -> int:
-    # Horizontal check
+    """Checks if a player has won."""
     for row in grid:
         for col in range(4):
             if row[col] == row[col + 1] == row[col + 2] == row[col + 3] != 0:
-                player_index = row[col]
-                return player_index
+                return row[col]
 
-    # Vertical check
     for col in range(7):
         for row in range(3):
             if grid[row][col] == grid[row + 1][col] == grid[row + 2][col] == grid[row + 3][col] != 0:
-                player_index = grid[row][col]
-                return player_index
+                return grid[row][col]
 
-    # Diagonal check (down-right and up-right)
     for row in range(3):
         for col in range(4):
             if grid[row][col] == grid[row + 1][col + 1] == grid[row + 2][col + 2] == grid[row + 3][col + 3] != 0:
-                player_index = grid[row][col]
-                return player_index
+                return grid[row][col]
             if grid[row + 3][col] == grid[row + 2][col + 1] == grid[row + 1][col + 2] == grid[row][col + 3] != 0:
-                player_index = grid[row + 3][col]
-                return player_index
+                return grid[row + 3][col]
     return 0
 
 def displayGrid(grid) -> str:
-    gridDisplay = ""
-    for row in grid:
-        for column in row:
-            if column == 0:
-                gridDisplay += ":black_large_square:"
-            elif column == 1:
-                gridDisplay += ":red_circle:"
-            elif column == 2:
-                gridDisplay += ":blue_circle:"
-        gridDisplay += "\n"
-    gridDisplay += ":one::two::three::four::five::six::seven:"
-    return gridDisplay
+    """Converts grid to an emoji-based string representation."""
+    emoji_map = {0: ":black_large_square:", 1: ":red_circle:", 2: ":blue_circle:"}
+    return "\n".join("".join(emoji_map[cell] for cell in row) for row in grid) + "\n:one::two::three::four::five::six::seven:"
 
 def drop_piece(grid, column, player):
+    """Drops a piece into a column if possible."""
     for row in reversed(grid):
         if row[column] == 0:
             row[column] = player
-            return
+            return True
+    return False
 
 class ConnectFour(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.game_message = None
-        self.game_players = []
-        self.turn = 0
-        self.game_grid = []
+        self.conn = sqlite3.connect('data.db')
+        self.cursor = self.conn.cursor()
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS connect_four (
+                game_id INTEGER PRIMARY KEY,
+                player1_id INTEGER NOT NULL,
+                player2_id INTEGER NOT NULL,
+                turn INTEGER NOT NULL,
+                grid TEXT NOT NULL,
+                message_id INTEGER NOT NULL,
+                channel_id INTEGER NOT NULL
+            )
+        """)
+        self.conn.commit()
 
     @commands.Cog.listener()
     async def on_ready(self):
         print(f"{__name__} is online!")
 
-
     @app_commands.command(name="connectfour", description="Start a Connect Four game")
     async def connect_four(self, interaction: discord.Interaction, opponent: discord.User):
+        """Starts a new Connect Four game."""
+        player1 = interaction.user.id
+        player2 = opponent.id
+
+        self.cursor.execute("DELETE FROM connect_four WHERE player1_id = ? OR player2_id = ?", (player1, player1))
+
+        """
+        if player1 == player2:
+            await interaction.response.send_message("You cannot play against yourself!", ephemeral=True)
+            return
+
+        # Check if players are already in a game
+        self.cursor.execute("SELECT game_id FROM connect_four WHERE player1_id IN (?, ?) OR player2_id IN (?, ?)", (player1, player2, player1, player2))
+        if self.cursor.fetchone():
+            await interaction.response.send_message("One of you is already in a game!", ephemeral=True)
+            return
+        """
+
+        # Initialize game state
+        grid = [[0] * 7 for _ in range(6)]
+        turn = random.randint(1, 2)
+
+        await interaction.response.send_message(embed=self.render_board(grid, player1, player2, turn))
+        board_msg = await interaction.original_response()
+
+        self.cursor.execute("INSERT INTO connect_four (player1_id, player2_id, turn, grid, message_id, channel_id) VALUES (?, ?, ?, ?, ?, ?)",
+                            (player1, player2, turn, json.dumps(grid), board_msg.id, board_msg.channel.id))
+        self.conn.commit()
+
+
+    @app_commands.command(name="connectfour_place", description="Drop a piece in a column")
+    async def connect_four_place(self, interaction: discord.Interaction, column: int):
         try:
-            self.game_grid = [[0] * 7 for _ in range(6)]
-            self.game_players = [interaction.user.id, opponent.id]
-            self.turn = random.randint(1,2)
+            """Handles piece placement."""
+            player_id = interaction.user.id
 
-            current_player = await self.bot.fetch_user(self.game_players[self.turn-1])
-            grid_display = f"{current_player.mention}'s Turn {':red_circle:' if self.turn == 1 else ':blue_circle:'}\n" + displayGrid(self.game_grid)
-            embed = discord.Embed(
-                title="Connect Four",
-                description=grid_display,
-                color=discord.Color.red() if self.turn == 1 else discord.Color.blue()
-            )
-            embed.set_footer(text="Use /connectfour_place to drop piece", icon_url=self.bot.user.avatar.url)
+            # Get active game
+            self.cursor.execute("SELECT game_id, player1_id, player2_id, turn, grid, message_id, channel_id FROM connect_four WHERE player1_id = ? OR player2_id = ?", (player_id, player_id))
+            game = self.cursor.fetchone()
 
-            await interaction.response.send_message(embed=embed)
-            self.game_message = await interaction.original_response()
-        except Exception as e:
-            await interaction.response.send_message(e, ephemeral=True)
-
-
-    @app_commands.command(name="connectfour_place", description="Place a piece on the Connect Four board")
-    async def connect_four_place(self, interaction: discord.Interaction, column: str):
-        try:
-            if self.game_message == None:
-                await interaction.response.send_message("There is no ongoing game! Use /connectfour to start a game.", ephemeral=True)
+            if not game:
+                await interaction.response.send_message("You are not in a game!", ephemeral=True)
                 return
-            print(self.game_players)
-            if interaction.user.id not in self.game_players:
-                await interaction.response.send_message("You are not in an ongoing game! Use /connectfour to start a game.", ephemeral=True)
-                return
-            print(self.game_players[self.turn-1])
-            if interaction.user.id != self.game_players[self.turn-1]:
+
+            game_id, player1, player2, turn, grid_str, message_id, channel_id = game
+            grid = json.loads(grid_str)
+
+            if (turn == 1 and player_id != player1) or (turn == 2 and player_id != player2):
                 await interaction.response.send_message("It's not your turn!", ephemeral=True)
                 return
-            if not column.isdigit():
-                await interaction.response.send_message("Not a valid input! Please input a number between 1-7", ephemeral=True)
-                return
-            
-            column = int(column)
 
             if column < 1 or column > 7:
-                await interaction.response.send_message("Column is out of range! Please input a number between 1-7", ephemeral=True)
+                await interaction.response.send_message("Invalid column! Choose between 1 and 7.", ephemeral=True)
                 return
-            if self.game_grid[0][column - 1] != 0:
-                await interaction.response.send_message("Column is full!", ephemeral=True)
-                return
-            
-            drop_piece(self.game_grid, column - 1, self.turn)
 
-            self.turn = 3 - self.turn
-            current_player = await self.bot.fetch_user(self.game_players[self.turn-1])
-            
-            status_label = ""
-            winValue = winCheck(self.game_grid)
-            if winValue != 0:
-                winner_user = await self.bot.fetch_user(self.game_players[winValue-1])
-                status_label = f":tada: {winner_user.mention} has won!"
+            col_idx = column - 1
+            if not drop_piece(grid, col_idx, turn):
+                await interaction.response.send_message("That column is full!", ephemeral=True)
+                return
+
+            winner = winCheck(grid)
+
+            next_turn = 1 if turn == 2 else 2
+
+            if winner == 0:
+                self.cursor.execute("UPDATE connect_four SET turn = ?, grid = ? WHERE game_id = ?", (next_turn, json.dumps(grid), game_id))
             else:
-                status_label = f"{current_player.mention}'s Turn {':red_circle:' if self.turn == 1 else ':blue_circle:'}\n"
-            grid_display = f"{status_label}\n" + displayGrid(self.game_grid)
-            embed = discord.Embed(
-                    title="Connect Four",
-                    description=grid_display,
-                    color=discord.Color.green() if winValue != 0 else discord.Color.red() if self.turn == 1 else discord.Color.blue()
-                )
-            embed.set_footer(text="Use /connectfour_place to drop piece", icon_url=self.bot.user.avatar.url)
+                self.cursor.execute("DELETE FROM connect_four WHERE game_id = ?", (game_id,))
+            self.conn.commit()
 
-            await interaction.response.send_message(f"Piece placed on column {column}", ephemeral=True)
-            await self.game_message.edit(embed=embed)
+            channel = await self.bot.fetch_channel(channel_id)
+            message = await channel.fetch_message(message_id)
+            await message.edit(embed=self.render_board(grid, player1, player2, winner if winner else next_turn, winner))
 
-            if winValue != 0: self.game_message = None
+            if winner:
+                await interaction.response.send_message(f"🎉 <@{player1 if winner == 1 else player2}> wins!", ephemeral=True)
+            else:
+                await interaction.response.send_message(f"Move placed in column `{column}`", ephemeral=True)
         except Exception as e:
-            await interaction.response.send_message(e, ephemeral=True)
+            await interaction.response.send_message(f"An error occured: {e}", ephemeral=True)
 
-        
+    def render_board(self, grid, player1, player2, turn, winner=0):
+        """Generates the game board as an embed."""
+        embed = discord.Embed(
+            title="Connect Four",
+            color=discord.Color.green() if winner else discord.Color.red() if turn == 1 else discord.Color.blue())
+        status_label = f"🎉 <@{player1 if winner == 1 else player2}> wins!" if winner else f"<@{player1 if turn == 1 else player2}>'s Turn {':red_circle:' if turn == 1 else ':blue_circle:'}"
+        embed.description = f"{status_label}\n{displayGrid(grid)}"
+        embed.set_footer(text="Use /connectfour_place to drop a piece")
+
+        return embed
 
 async def setup(bot):
     await bot.add_cog(ConnectFour(bot))

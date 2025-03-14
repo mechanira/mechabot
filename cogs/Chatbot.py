@@ -4,6 +4,7 @@ import datetime
 from discord.ext import commands
 from dotenv import load_dotenv
 import google.generativeai as genai
+import re
 
 class Chatbot(commands.Cog):
     def __init__(self, bot):
@@ -11,21 +12,22 @@ class Chatbot(commands.Cog):
         self.CHANNEL_ID = 1328122057254371429
         self.chat = None
 
-        # Load environment variables
         load_dotenv()
 
-        # Configure genai API
         genai.configure(api_key=os.getenv("GEMINI_KEY"))
 
         # Initialize the model
         self.model = genai.GenerativeModel(
-            model_name='models/gemini-1.5-flash-001',
+            model_name='models/gemini-2.0-flash',
             system_instruction=(
-                "You are a helpful and conversational Discord chatbot named Kirabot. "
+                "You are a chatbot named Mechabot."
                 "When responding to messages, do not include your own name or display name. "
                 "When interpreting user inputs, they will be formatted as: "
                 "username (display_name): [message content]. "
                 "Your responses should directly address the user's query without including any prefixes."
+                "Your responses should be as concise as possible"
+                "Avoid unnecessary line breaks in your responses"
+                "You can return a response of \"/fallback\" if the message doesn't need to be replied to, like when someone isn't referencing you directly"
             )
         )
 
@@ -56,17 +58,26 @@ class Chatbot(commands.Cog):
         '''
 
         try:
-            async with message.channel.typing():
-                # Send user message to the chat model
-                response = self.chat.send_message(
-                    f"{message.author.name} ({message.author.display_name}): {message.content}"
-                )
-                response_text = response.text
+            response = self.chat.send_message(
+                f"{message.author.name} ({message.author.display_name}): {message.content}"
+            )
+            response_text = response.text
 
-                if response_text.startswith("Kirabot (Kirabot):"):
-                    response_text = response_text.split(": ", 1)[-1]
+            if "/fallback" in response_text.lower():
+                return
 
-                await message.reply(response_text)
+            if response_text.startswith("Kirabot (Kirabot):"):
+                response_text = response_text.split(": ", 1)[-1]
+
+            emoji_pattern = re.compile("["
+                            u"\U0001F600-\U0001F64F"  # emoticons
+                            u"\U0001F300-\U0001F5FF"  # symbols & pictographs
+                            u"\U0001F680-\U0001F6FF"  # transport & map symbols
+                            u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
+                            "]+", flags=re.UNICODE)
+            filtered_response = emoji_pattern.sub(r'', response_text)
+
+            await message.reply(filtered_response)
         except Exception as e:
             print(f"Error processing message: {e}")
 

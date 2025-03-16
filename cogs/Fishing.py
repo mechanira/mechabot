@@ -7,6 +7,7 @@ import os
 import json
 import sqlite3
 import traceback
+import datetime
 
 xp_emojis = ["<:xp_bar_1:1348303541944586302>",
              "<:xp_bar_2:1348303635033100339>",
@@ -14,6 +15,26 @@ xp_emojis = ["<:xp_bar_1:1348303541944586302>",
              "<:xp_bar_filled_1:1348303686069387264>",
              "<:xp_bar_filled_2:1348303598999834725>",
              "<:xp_bar_filled_3:1348304333455888495>"]
+
+biome_level_requirements = {
+    "river": 0,
+    "lake": 10,
+    "ocean": 20,
+    "jungle": 30,
+    "cave": 35,
+    "volcano": 40,
+    "sky": 50,
+    "space": 60
+}
+
+rarity_colors = [
+    discord.Color.greyple(),
+    discord.Color.green(),
+    discord.Color.blue(),
+    discord.Color.purple(),
+    discord.Color.yellow(),
+    discord.Color.fuchsia()
+]
 
 class Fishing(commands.Cog):
     def __init__(self, bot):
@@ -36,6 +57,7 @@ class Fishing(commands.Cog):
                 user_id INTEGER,
                 name TEXT,
                 lore TEXT,
+                rarity INTEGER,
                 size INTEGER,
                 value INTEGER,
                 biome TEXT,
@@ -117,8 +139,8 @@ class Fishing(commands.Cog):
             )
 
             self.cursor.execute(
-                "INSERT INTO infi_fish (user_id, name, lore, size, value, biome) VALUES (?, ?, ?, ?, ?, ?)",
-                (interaction.user.id, fish_name, lore, size, value, current_biome)
+                "INSERT INTO infi_fish (user_id, name, lore, rarity, size, value, biome) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (interaction.user.id, fish_name, lore, rarity, size, value, current_biome)
             )
             fish_id = self.cursor.lastrowid
 
@@ -133,17 +155,8 @@ class Fishing(commands.Cog):
                 max_xp = round(max_xp * 1.5)
                 level_label = f"**LEVEL UP! {old_level} >> {level}**"
 
-            rarity_colors = [
-                discord.Color.greyple(),
-                discord.Color.green(),
-                discord.Color.blue(),
-                discord.Color.purple(),
-                discord.Color.yellow(),
-                discord.Color.fuchsia()
-            ]
-
             embed = discord.Embed(
-                title=f"{fish_name} • {':star:' * rarity}",
+                title=f"{fish_name} {':star:' * rarity}",
                 description=f"""
                 *{lore}*
 
@@ -157,17 +170,23 @@ class Fishing(commands.Cog):
             )
             embed.set_footer(text=f"Biome: {current_biome} • ID: {fish_id}")
 
-            self.cursor.execute(
-                "UPDATE infi_user SET level = ?, xp = ?, max_xp = ?, current_biome = ? WHERE id = ?",
-                (level, xp, max_xp, current_biome, user_id)
-            )
+            self.cursor.execute("""
+                INSERT INTO infi_user (id, level, xp, max_xp, current_biome) 
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET 
+                    level = excluded.level,
+                    xp = excluded.xp,
+                    max_xp = excluded.max_xp,
+                    current_biome = excluded.current_biome;
+            """, (user_id, level, xp, max_xp, current_biome))
             self.conn.commit()
 
             await interaction.response.send_message(embed=embed)
         except Exception as e:
             print(traceback.format_exc())
 
-    @app_commands.command(name="biome", description="Change the fishing biome")
+
+    @app_commands.command(name="biomes", description="Change the fishing biome")
     @app_commands.choices(biome=[
         app_commands.Choice(name="River", value="river"),
         app_commands.Choice(name="Lake", value="lake"),
@@ -178,13 +197,37 @@ class Fishing(commands.Cog):
         app_commands.Choice(name="Sky", value="sky"),
         app_commands.Choice(name="Space", value="space")
         ])
-    async def biome(self, interaction: discord.Interaction, biome: app_commands.Choice[str]):
-        self.cursor.execute(
-            "UPDATE infi_user SET current_biome = ? WHERE id = ?",
-            (biome.value, interaction.user.id))
-        self.conn.commit()
+    async def biomes(self, interaction: discord.Interaction, biome: app_commands.Choice[str] = None):
+        try:
+            if biome == None:
+                description = ""
+                for k, v in biome_level_requirements.items():
+                    description += f"{k.capitalize()} - Level {v}\n"
 
-        await interaction.response.send_message(f"Biome changed to **{biome.value}**")
+                embed = discord.Embed(
+                    title="Biome Menu",
+                    description=description
+                )
+
+                await interaction.response.send_message(embed=embed)
+                return
+
+            user_data = self.cursor.execute("SELECT level FROM infi_user WHERE id = ?", (interaction.user.id,))
+            level = user_data.fetchone()[0]
+
+            if level < biome_level_requirements[biome.value]:
+                await interaction.response.send_message(f"You need to be level {biome_level_requirements[biome.value]} to access the {biome.name} biome!", ephemeral=True)
+                return
+
+
+            self.cursor.execute(
+                "UPDATE infi_user SET current_biome = ? WHERE id = ?",
+                (biome.value, interaction.user.id))
+            self.conn.commit()
+
+            await interaction.response.send_message(f"Biome successfully changed to **{biome.name}**!")
+        except:
+            print(traceback.format_exc())
 
 
     @app_commands.command(name="sell", description="Sell all your fish")
@@ -235,6 +278,66 @@ class Fishing(commands.Cog):
 
         await interaction.response.send_message(embed=embed)
 
+    @app_commands.command(name="search_fish", description="Search for fish")
+    async def search_fish(self, interaction: discord.Interaction, query: str, sort: str = None):
+        try:
+            try: # try parsing the query into an id
+                query = int(query)
+                self.cursor.execute("SELECT id, user_id, name, lore, rarity, size, value, biome, sold FROM infi_fish WHERE id = ?", (int(query),))
+                fish_data = self.cursor.fetchone()
+
+                if fish_data is None:
+                    await interaction.response.send_message("No fish was found with the provided query.", ephemeral=True)
+                    return
+                
+                id, user_id, name, lore, rarity, size, value, biome, sold = fish_data
+
+                embed = discord.Embed(
+                    title=f"{name} {':star:' * rarity}",
+                    description=f"""
+                    *{lore}*
+
+                    **Size:** {size} cm
+                    **Value:** ${value:,}
+                    **Biome:** {biome.capitalize()}\
+                    
+                    **Caught by:** <@{user_id}>
+                    **Sold:** {'true' if sold else 'false'}
+                    """,
+                    color=rarity_colors[rarity-1]
+                )
+                embed.set_footer(text=f"ID: {id}")
+
+                await interaction.response.send_message(embed=embed)
+
+            except ValueError: # if query can't be parsed into an id
+                start_time = datetime.datetime.now()
+
+                self.cursor.execute("SELECT id, user_id, name, rarity FROM infi_fish WHERE name LIKE ?", (f"%{query}%",))
+                fish_data = self.cursor.fetchall()
+
+                end_time = datetime.datetime.now()
+                query_time = int((end_time - start_time).microseconds / 1000)
+
+                entries = len(fish_data)
+
+                description = ""
+
+                for entry in fish_data[:10]:
+                    id, user_id, name, rarity = entry
+                    description += f"{name} • {':star:'}{rarity} • <@{user_id}> • `#{id}`\n"
+
+                embed = discord.Embed(
+                    title="Fish Search Results",
+                    description=description
+                )
+                embed.set_footer(text=f"Found {len(fish_data)} results in {query_time}ms")
+
+                await interaction.response.send_message(embed=embed)
+        except:
+            print(traceback.format_exc())
+
+
 
     def xp_bar(self, xp, max_xp, length=10) -> str:
         percentage = round((xp / max_xp) * 100)
@@ -263,4 +366,5 @@ class Fishing(commands.Cog):
         
 
 async def setup(bot):
+
     await bot.add_cog(Fishing(bot))

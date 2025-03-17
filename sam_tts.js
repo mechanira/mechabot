@@ -3,28 +3,24 @@ const fs = require("fs");
 
 async function synthesizeSAM(text, outputFile, volume = 0.5) {
     let sam = new SamJs();
-    const rawBuffer = sam.buf8(text); // Get raw PCM audio buffer
+    const rawBuffer = sam.buf8(text);
 
-    // Reduce volume by scaling amplitude (volume range: 0.0 - 1.0)
     const adjustedBuffer = adjustVolume(rawBuffer, volume);
 
-    // Convert raw buffer to a proper WAV format
     const wavBuffer = createWavBuffer(adjustedBuffer, 22050, 1, 8);
 
     fs.writeFileSync(outputFile, wavBuffer);
     console.log(`✅ WAV file saved: ${outputFile} with volume: ${volume}`);
 }
 
-// Function to scale the amplitude (lower volume)
 function adjustVolume(buffer, volume) {
     const adjusted = Buffer.from(buffer);
     for (let i = 0; i < buffer.length; i++) {
-        adjusted[i] = Math.round(128 + (buffer[i] - 128) * volume); // Scale amplitude
+        adjusted[i] = Math.round(128 + (buffer[i] - 128) * volume);
     }
     return adjusted;
 }
 
-// Function to generate a valid WAV buffer with a proper header
 function createWavBuffer(rawBuffer, sampleRate, numChannels, bitDepth) {
     const byteRate = (sampleRate * numChannels * bitDepth) / 8;
     const blockAlign = (numChannels * bitDepth) / 8;

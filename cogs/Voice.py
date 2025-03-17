@@ -1,11 +1,7 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-import random
-import os
-import asyncio
 import subprocess
-import time
 
 class Voice(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -69,7 +65,7 @@ class Voice(commands.Cog):
 
     def generate_sam_voice(self, text):
         output_file = "sam_output.wav"
-        subprocess.run(["node", "sam_tts.js", text, 0.5])
+        subprocess.run(["node", "sam_tts.js", text])
         return output_file
     
 

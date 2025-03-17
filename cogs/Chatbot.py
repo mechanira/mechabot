@@ -1,6 +1,5 @@
 import discord
 import os
-import datetime
 from discord.ext import commands
 from dotenv import load_dotenv
 import google.generativeai as genai

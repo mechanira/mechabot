@@ -1,8 +1,6 @@
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
-import random
-import os
 import re
 import time
 from datetime import datetime, timezone

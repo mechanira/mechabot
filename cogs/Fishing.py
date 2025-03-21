@@ -9,12 +9,17 @@ import sqlite3
 import traceback
 import datetime
 
-xp_emojis = ["<:xp_bar_1:1348303541944586302>",
-             "<:xp_bar_2:1348303635033100339>",
-             "<:xp_bar_3:1348304289558298724>",
-             "<:xp_bar_filled_1:1348303686069387264>",
-             "<:xp_bar_filled_2:1348303598999834725>",
-             "<:xp_bar_filled_3:1348304333455888495>"]
+xp_emojis = {
+    "left_empty": "<:xp_right_empty:1351216992056639530>",
+    "left_half": "<:xp_left_half:1351217325336039474>",
+    "left_full": "<:xp_left_full:1351217303076995236>",
+    "middle_empty": "<:xp_middle_empty:1351217360320594032>",
+    "middle_half": "<:xp_middle_half:1351217426590601236>",
+    "middle_full": "<:xp_middle_full:1351217406617587723>",
+    "right_empty": "<:xp_right_empty:1351217444651405322>",
+    "right_half": "<:xp_right_half:1351217474091225118>",
+    "right_full": "<:xp_right_full:1351217458265980948>",
+}
 
 biome_level_requirements = {
     "river": 0,
@@ -105,85 +110,84 @@ class Fishing(commands.Cog):
     
     @app_commands.command(name="fish", description="Catch a fish!")
     async def fish(self, interaction: discord.Interaction):
-        try:
-            user_id = interaction.user.id
+        user_id = interaction.user.id
 
-            self.cursor.execute("SELECT level, xp, max_xp, current_biome FROM infi_user WHERE id = ?", (user_id,))
-            user_data = self.cursor.fetchone()
+        self.cursor.execute("BEGIN TRANSACTION;")
+
+        self.cursor.execute("SELECT level, xp, max_xp, current_biome FROM infi_user WHERE id = ?", (user_id,))
+        user_data = self.cursor.fetchone()
+        
+        if user_data is not None:
+            level, xp, max_xp, current_biome = user_data
+        else:
+            level = 1
+            xp = 0
+            max_xp = 100
+            current_biome = 'river'
             
-            if user_data is not None:
-                level, xp, max_xp, current_biome = user_data
-            else:
-                level = 1
-                xp = 0
-                max_xp = 100
-                current_biome = 'river'
-                
-            weights = [1, 4, 20, 65, 195, 360]
-            rarity_levels = [6, 5, 4, 3, 2, 1]
-            
-            rarity = random.choices(rarity_levels, weights)[0]
+        weights = [1, 4, 20, 65, 195, 360]
+        rarity_levels = [6, 5, 4, 3, 2, 1]
+        
+        rarity = random.choices(rarity_levels, weights)[0]
 
-            payload = {
-                "biome": current_biome,
-                "rarity": rarity
-            }
-            print(payload)
+        payload = {
+            "biome": current_biome,
+            "rarity": rarity
+        }
+        print(payload)
 
-            response = self.model.generate_content(str(payload))
-            print(response.text)
-            response_dict = json.loads(response.text)
-            fish_name, lore, size, value, xp_gain = (
-                response_dict.get(k, default) for k, default in 
-                [("name", "Unknown"), ("lore", "No lore available"), ("size", "Unknown"), ("value", 0), ("xp", 0)]
-            )
+        response = self.model.generate_content(str(payload))
+        print(response.text)
+        response_dict = json.loads(response.text)
+        fish_name, lore, size, value, xp_gain = (
+            response_dict.get(k, default) for k, default in 
+            [("name", "Unknown"), ("lore", "No lore available"), ("size", "Unknown"), ("value", 0), ("xp", 0)]
+        )
 
-            self.cursor.execute(
-                "INSERT INTO infi_fish (user_id, name, lore, rarity, size, value, biome) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (interaction.user.id, fish_name, lore, rarity, size, value, current_biome)
-            )
-            fish_id = self.cursor.lastrowid
+        self.cursor.execute(
+            "INSERT INTO infi_fish (user_id, name, lore, rarity, size, value, biome) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (interaction.user.id, fish_name, lore, rarity, size, value, current_biome)
+        )
+        fish_id = self.cursor.lastrowid
 
-            xp += xp_gain
-            old_level = level
+        xp += xp_gain
+        old_level = level
 
-            level_label = f"Level {level}"
+        level_label = f"Level {level}"
 
-            while(xp >= max_xp):
-                xp -= max_xp
-                level += 1
-                max_xp = round(max_xp * 1.5)
-                level_label = f"**LEVEL UP! {old_level} >> {level}**"
+        while(xp >= max_xp):
+            xp -= max_xp
+            max_xp = self.xp_required(level=level)
+            level += 1
+            level_label = f"**LEVEL UP! {old_level} >> {level}**"
 
-            embed = discord.Embed(
-                title=f"{fish_name} {':star:' * rarity}",
-                description=f"""
-                *{lore}*
+        embed = discord.Embed(
+            title=f"{fish_name} {':star:' * rarity}",
+            description=f"""
+            *{lore}*
 
-                **Size:** {size} cm
-                **Value:** ${value:,}
+            **Size:** {size} cm
+            **Value:** ${value:,}
 
-                {level_label}
-                {self.xp_bar(xp, max_xp)} {xp:,}/{max_xp:,} `+{xp_gain}`
-                """,
-                color=rarity_colors[rarity-1]
-            )
-            embed.set_footer(text=f"Biome: {current_biome} • ID: {fish_id}")
+            {level_label}
+            {self.xp_bar(xp, max_xp)} {xp:,}/{max_xp:,} `+{xp_gain}`
+            """,
+            color=rarity_colors[rarity-1]
+        )
+        embed.set_footer(text=f"Biome: {current_biome} • ID: {fish_id}")
 
-            self.cursor.execute("""
-                INSERT INTO infi_user (id, level, xp, max_xp, current_biome) 
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET 
-                    level = excluded.level,
-                    xp = excluded.xp,
-                    max_xp = excluded.max_xp,
-                    current_biome = excluded.current_biome;
-            """, (user_id, level, xp, max_xp, current_biome))
-            self.conn.commit()
+        self.cursor.execute("""
+            INSERT INTO infi_user (id, level, xp, max_xp, current_biome) 
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET 
+                level = excluded.level,
+                xp = excluded.xp,
+                max_xp = excluded.max_xp,
+                current_biome = excluded.current_biome;
+        """, (user_id, level, xp, max_xp, current_biome))
+        self.conn.commit()
 
-            await interaction.response.send_message(embed=embed)
-        except Exception as e:
-            print(traceback.format_exc())
+        await interaction.response.send_message(embed=embed)
 
 
     @app_commands.command(name="biomes", description="Change the fishing biome")
@@ -294,18 +298,16 @@ class Fishing(commands.Cog):
 
                 embed = discord.Embed(
                     title=f"{name} {':star:' * rarity}",
-                    description=f"""
-                    *{lore}*
-
-                    **Size:** {size} cm
-                    **Value:** ${value:,}
-                    **Biome:** {biome.capitalize()}\
-                    
-                    **Caught by:** <@{user_id}>
-                    **Sold:** {'true' if sold else 'false'}
-                    """,
+                    description=f"*{lore}*",
                     color=rarity_colors[rarity-1]
                 )
+
+                embed.add_field(name="Size", value=size)
+                embed.add_field(name="Value", value=f"${value:,}")
+                embed.add_field(name="Biome", value=biome.capitalize())
+                embed.add_field(name="Caught by", value=f"<@{user_id}>")
+                embed.add_field(name="Value", value=f"{'true' if sold else 'false'}")
+
                 embed.set_footer(text=f"ID: {id}")
 
                 await interaction.response.send_message(embed=embed)
@@ -318,8 +320,6 @@ class Fishing(commands.Cog):
 
                 end_time = datetime.datetime.now()
                 query_time = int((end_time - start_time).microseconds / 1000)
-
-                entries = len(fish_data)
 
                 description = ""
 
@@ -338,33 +338,68 @@ class Fishing(commands.Cog):
             print(traceback.format_exc())
 
 
+    @app_commands.command(name="list_users", description="List all fishing users")
+    async def list_users(self, interaction: discord.Interaction):
+        try:
+            self.cursor.execute("SELECT * FROM infi_user")
+            user_data = self.cursor.fetchall()
+
+            description = ""
+            for user in user_data:
+                id, level, xp, max_xp, balance, current_biome = user
+                description += f"<@{id}> • LVL {level} {xp}/{max_xp} • {balance} \n"
+
+            embed = discord.Embed(
+                title="User List",
+                description=description
+            )
+            
+            await interaction.response.send_message(embed=embed)
+        except:
+            traceback.print_exc()
+
+
 
     def xp_bar(self, xp, max_xp, length=10) -> str:
-        percentage = round((xp / max_xp) * 100)
-        filled_bars = round(percentage / length)
+        progress = max(0, min(1, xp / max_xp))
+        filled_bars = int(progress * length)
+        remaining = (progress * length) - filled_bars
 
         bar_string = ""
 
-        for i in range(1, length+1):
-            if i <= filled_bars:
-                if i == 1:
-                    bar_string += xp_emojis[3]
-                elif i < length:
-                    bar_string += xp_emojis[4]
-                else:
-                    bar_string += xp_emojis[5]
+        # left bar
+        if filled_bars == 0:
+            if remaining > 0.5:
+                bar_string += xp_emojis["left_half"]
+            elif remaining > 0:
+                bar_string += xp_emojis["left_empty"]
             else:
-                if i == 1:
-                    bar_string += xp_emojis[0]
-                elif i < length:
-                    bar_string += xp_emojis[1]
-                else:
-                    bar_string += xp_emojis[2]
+                bar_string += xp_emojis["left_empty"]
+        else:
+            bar_string += xp_emojis["left_full"]
+
+        # middle bars
+        for i in range(1, length - 1):
+            if i < filled_bars:
+                bar_string += xp_emojis["middle_full"]
+            elif i == filled_bars and remaining >= 0.5:
+                bar_string += xp_emojis["middle_half"]
+            else:
+                bar_string += xp_emojis["middle_empty"]
+
+        # right bar
+        if filled_bars >= length - 1:
+            bar_string += xp_emojis["right_full"]
+        elif filled_bars == length - 1 and remaining >= 0.5:
+            bar_string += xp_emojis["right_half"]
+        else:
+            bar_string += xp_emojis["right_empty"]
 
         return bar_string
-    
-        
+
+    def xp_required(self, level, base_xp=100, growth=15, scale=1.1):
+        return int(base_xp + (level ** 2 * growth) + (level * scale * base_xp))
+       
 
 async def setup(bot):
-
     await bot.add_cog(Fishing(bot))

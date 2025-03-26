@@ -10,7 +10,7 @@ async function synthesizeSAM(text, outputFile, volume = 0.5) {
     const wavBuffer = createWavBuffer(adjustedBuffer, 22050, 1, 8);
 
     fs.writeFileSync(outputFile, wavBuffer);
-    console.log(`✅ WAV file saved: ${outputFile} with volume: ${volume}`);
+    console.log(`WAV file saved: ${outputFile} with volume: ${volume}`);
 }
 
 function adjustVolume(buffer, volume) {

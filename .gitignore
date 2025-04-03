@@ -10,6 +10,7 @@ __pycache__/
 *.db
 *.json
 *.wav
+*.ogg
 node_modules/
 *.db-journal
 

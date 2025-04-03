@@ -1,10 +1,14 @@
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord import app_commands
 import random
 import os
 import traceback
 import re
+import aiohttp
+import numpy as np
+from PIL import Image
+from io import BytesIO
 
 kaomoji = [">.<", ":3", "^-^", "^.^", ">w<", "^.~", "~.^", ">.<", "^o^", "^_^", ">.>", "^3^"]
 uwu_pattern = [
@@ -34,7 +38,6 @@ def uwuify(string: str):
         for pattern, substitution in uwu_pattern:
             word = re.sub(pattern, substitution, word)
         
-        # stutter handling
         next_char_case = word[1].isupper() if len(word) > 1 else False
         _word = ''
         
@@ -46,7 +49,6 @@ def uwuify(string: str):
                 
             _word += (word[0].upper() if next_char_case else word[0].lower()) + word[1:]
         
-        # kaomoji handling
         if random.random() <= kaomoji_chance:
             _word = (_word or word) + ' ' + kaomoji[random.randrange(0, len(kaomoji))]
 
@@ -92,7 +94,12 @@ class Utils(commands.Cog):
             stripped_content = message.content.lower().strip("")
 
             if "im" and "hungry" in stripped_content:
-                await message.reply("https://tenor.com/view/treyreloaded-horse-staring-gif-26656776")
+                hungry_horse = [
+                    "https://media.discordapp.net/attachments/1286778100616527915/1355572584619573428/images.png?ex=67e96ad9&is=67e81959&hm=c7d2f8408782b2771497939fb4af00a69f6929b5fae9b9d7b8d69afbec2a9121&=&format=webp&quality=lossless",
+                    "https://tenor.com/view/treyreloaded-horse-staring-gif-26656776"
+                ]
+
+                await message.reply(random.choice(hungry_horse))
         except:
             print(traceback.print_exc())
 
@@ -134,10 +141,8 @@ class Utils(commands.Cog):
                 if not matching_videos:
                     await interaction.response.send_message(f"No object has been found. Try entering (1-1000)", ephemeral=True)
                     return
-                # Select the first matching video (or modify if you want a different behavior)
                 selected_video = matching_videos[0]
             else:
-                # Pick a random video if no query is provided
                 selected_video = random.choice(video_files)
 
             video_path = os.path.join(path, selected_video)
@@ -161,6 +166,31 @@ class Utils(commands.Cog):
         else:
             self.uwuified.remove(interaction.user.id)
             await interaction.response.send_message("Turned uwuifier off")
+
+
+    @app_commands.command(name="average_color", description="Gets the average color of an image")
+    async def average_color(self, interaction: discord.Interaction, url: str):
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status != 200:
+                    await interaction.response.send_message("Failed to get image data.", ephemeral=True)
+
+                img_data = await response.read()
+                image = Image.open(BytesIO(img_data))
+                image = image.convert("RGB")
+
+                img_array = np.array(image)
+                avg_color = tuple(map(int, np.mean(img_array, axis=(0, 1))))
+                avg_color_hex = "#{:02x}{:02x}{:02x}".format(*avg_color)
+
+                solid_image = Image.new("RGB", (100, 100), avg_color)
+                image_buffer = BytesIO()
+                solid_image.save(image_buffer, format="PNG")
+                image_buffer.seek(0)
+                
+                file = discord.File(image_buffer, filename="average_color.png")
+
+                await interaction.response.send_message(f"The average color of the [image](<{url}>) is `{avg_color_hex}`.", file=file)
 
 
 async def setup(bot):

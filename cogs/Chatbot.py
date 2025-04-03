@@ -15,7 +15,6 @@ class Chatbot(commands.Cog):
 
         genai.configure(api_key=os.getenv("GEMINI_KEY"))
 
-        # Initialize the model
         self.model = genai.GenerativeModel(
             model_name='models/gemini-2.0-flash',
             system_instruction=(
@@ -30,19 +29,19 @@ class Chatbot(commands.Cog):
             )
         )
 
+
     @commands.Cog.listener()
     async def on_ready(self):
         try:
-            # Fetch channel history
             history = await self.fetch_channel_history(self.CHANNEL_ID)
             self.chat = self.model.start_chat(history=history)
             print(f"{__name__} is online!")
         except Exception as e:
             print(f"Error during on_ready: {e}")
 
+
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        # Ignore messages outside the target channel or from bots
         if message.channel.id != self.CHANNEL_ID or message.author.bot:
             return
         
@@ -80,6 +79,7 @@ class Chatbot(commands.Cog):
         except Exception as e:
             print(f"Error processing message: {e}")
 
+
     async def fetch_channel_history(self, channel_id):
         try:
             channel = await self.bot.fetch_channel(channel_id)
@@ -100,6 +100,7 @@ class Chatbot(commands.Cog):
         except Exception as e:
             print(f"Error fetching channel history: {e}")
             return []
+
 
 async def setup(bot):
     await bot.add_cog(Chatbot(bot))

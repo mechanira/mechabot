@@ -59,6 +59,7 @@ class Reminder(commands.Cog):
         self.check_reminders.cancel()
         self.conn.close()
 
+
     @app_commands.command(name="reminder", description="Set a reminder")
     async def set_reminder(
         self, 
@@ -100,6 +101,7 @@ class Reminder(commands.Cog):
         except Exception as e:
             print(e)
 
+
     @app_commands.command(name="reminder_daily", description="Set a daily reminder for ")
     @app_commands.describe(
         time_input = "Expected format: HH:MM"
@@ -119,7 +121,6 @@ class Reminder(commands.Cog):
             channel_id = None
             send_dm = True
 
-            # Save daily reminder to the database (corrected query)
             self.cursor.execute(
                 "INSERT INTO reminders (user_id, channel_id, label, daily_time, send_dm) VALUES (?, ?, ?, ?, ?)",
                 (user.id, channel_id, label, time_input, send_dm)
@@ -138,11 +139,13 @@ class Reminder(commands.Cog):
             print(f"General error: {e}")
             await interaction.response.send_message("Something went wrong. Please try again later.", ephemeral=True)
 
+
     @app_commands.command(name="reminder_daily_cancel", description="Cancel a daily reminder by label")
     async def cancel_weekly_reminder(self, interaction: discord.Interaction, label: str):
         self.cursor.execute("DELETE FROM reminders WHERE user_id = ? AND label = ?", (interaction.user.id, label))
         self.conn.commit()
         await interaction.response.send_message(f"Daily reminder `{label}` has been canceled!", ephemeral=True)
+
 
     @app_commands.command(name="reminders", description="View all your active reminders")
     async def view_reminders(self, interaction: discord.Interaction):
@@ -170,6 +173,7 @@ class Reminder(commands.Cog):
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
+
     @tasks.loop(seconds=10)
     async def check_reminders(self):
         """Checks for due reminders and sends messages."""
@@ -191,9 +195,9 @@ class Reminder(commands.Cog):
                 if channel:
                     await channel.send(f"<@{user_id}>, reminder: **{label}** is due!")
 
-            # Remove sent reminders
             self.cursor.execute("DELETE FROM reminders WHERE id = ?", (reminder_id,))
             self.conn.commit()
+
 
     @tasks.loop(minutes=1)
     async def check_daily_reminders(self):
@@ -201,10 +205,9 @@ class Reminder(commands.Cog):
         current_time = datetime.now(timezone.utc)
         current_hour_minute = current_time.strftime("%H:%M")
 
-        # Fetch reminders for the current time
         self.cursor.execute(
             "SELECT user_id, channel_id, label, send_dm FROM reminders WHERE daily_time = ?", 
-            (current_hour_minute,)  # Fix: Pass as a tuple
+            (current_hour_minute,)
         )
         reminders = self.cursor.fetchall()
 

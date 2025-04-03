@@ -100,6 +100,7 @@ class Fishing(commands.Cog):
             )
         )
 
+
     @commands.Cog.listener()
     async def on_ready(self):
         try:
@@ -202,61 +203,55 @@ class Fishing(commands.Cog):
         app_commands.Choice(name="Space", value="space")
         ])
     async def biomes(self, interaction: discord.Interaction, biome: app_commands.Choice[str] = None):
-        try:
-            if biome == None:
-                description = ""
-                for k, v in biome_level_requirements.items():
-                    description += f"{k.capitalize()} - Level {v}\n"
+        if biome == None:
+            description = ""
+            for k, v in biome_level_requirements.items():
+                description += f"{k.capitalize()} - Level {v}\n"
 
-                embed = discord.Embed(
-                    title="Biome Menu",
-                    description=description
-                )
+            embed = discord.Embed(
+                title="Biome Menu",
+                description=description
+            )
 
-                await interaction.response.send_message(embed=embed)
-                return
+            await interaction.response.send_message(embed=embed)
+            return
 
-            user_data = self.cursor.execute("SELECT level FROM infi_user WHERE id = ?", (interaction.user.id,))
-            level = user_data.fetchone()[0]
+        user_data = self.cursor.execute("SELECT level FROM infi_user WHERE id = ?", (interaction.user.id,))
+        level = user_data.fetchone()[0]
 
-            if level < biome_level_requirements[biome.value]:
-                await interaction.response.send_message(f"You need to be level {biome_level_requirements[biome.value]} to access the {biome.name} biome!", ephemeral=True)
-                return
+        if level < biome_level_requirements[biome.value]:
+            await interaction.response.send_message(f"You need to be level {biome_level_requirements[biome.value]} to access the {biome.name} biome!", ephemeral=True)
+            return
 
 
-            self.cursor.execute(
-                "UPDATE infi_user SET current_biome = ? WHERE id = ?",
-                (biome.value, interaction.user.id))
-            self.conn.commit()
+        self.cursor.execute(
+            "UPDATE infi_user SET current_biome = ? WHERE id = ?",
+            (biome.value, interaction.user.id))
+        self.conn.commit()
 
-            await interaction.response.send_message(f"Biome successfully changed to **{biome.name}**!")
-        except:
-            print(traceback.format_exc())
+        await interaction.response.send_message(f"Biome successfully changed to **{biome.name}**!")
 
 
     @app_commands.command(name="sell", description="Sell all your fish")
     async def sell(self, interaction: discord.Interaction):
-        try:
-            self.cursor.execute("BEGIN TRANSACTION;")
+        self.cursor.execute("BEGIN TRANSACTION;")
 
-            self.cursor.execute("SELECT id, value from infi_fish WHERE user_id = ? AND sold = 0", (interaction.user.id,))
-            unsold_fish = self.cursor.fetchall()
+        self.cursor.execute("SELECT id, value from infi_fish WHERE user_id = ? AND sold = 0", (interaction.user.id,))
+        unsold_fish = self.cursor.fetchall()
 
-            total_value = sum(fish[1] for fish in unsold_fish)
+        total_value = sum(fish[1] for fish in unsold_fish)
 
-            if unsold_fish:
-                self.cursor.execute("UPDATE infi_fish SET sold = 1 WHERE user_id = ? AND sold = 0", (interaction.user.id,)) 
+        if unsold_fish:
+            self.cursor.execute("UPDATE infi_fish SET sold = 1 WHERE user_id = ? AND sold = 0", (interaction.user.id,)) 
 
-                self.cursor.execute("UPDATE infi_user SET balance = balance + ? WHERE id = ?", (total_value, interaction.user.id))
-            else:
-                await interaction.response.send_message("You have no fish to sell.", ephemeral=True)
-                return
+            self.cursor.execute("UPDATE infi_user SET balance = balance + ? WHERE id = ?", (total_value, interaction.user.id))
+        else:
+            await interaction.response.send_message("You have no fish to sell.", ephemeral=True)
+            return
 
-            self.conn.commit()
+        self.conn.commit()
 
-            await interaction.response.send_message(f"Sold {len(unsold_fish)} fish for ${total_value:,}")
-        except Exception as e:
-            print(traceback.format_exc())
+        await interaction.response.send_message(f"Sold {len(unsold_fish)} fish for ${total_value:,}")
 
     
     @app_commands.command(name="profile", description="Check your fishing profile")
@@ -270,93 +265,94 @@ class Fishing(commands.Cog):
             await interaction.response.send_message("You don't have a fishing profile created. Do `/fish` to create one")
             return
         
+        self.cursor.execute("SELECT * FROM infi_fish WHERE user_id = ?", (interaction.user.id,))
+        user_fish = self.cursor.fetchall()
+        
         embed = discord.Embed(
             title=f"{interaction.user.display_name}'s Fishing Profile",
             description=f"""
                 **Level {level}**
                 {self.xp_bar(xp, max_xp)} {xp:,}/{max_xp:,}
                 Balance: `${balance:,}`
+                Fish caught: `{len(user_fish)}`
                 Biome: `{current_biome}`
             """
         )
 
         await interaction.response.send_message(embed=embed)
 
+
     @app_commands.command(name="search_fish", description="Search for fish")
-    async def search_fish(self, interaction: discord.Interaction, query: str, sort: str = None):
-        try:
-            try: # try parsing the query into an id
-                query = int(query)
-                self.cursor.execute("SELECT id, user_id, name, lore, rarity, size, value, biome, sold FROM infi_fish WHERE id = ?", (int(query),))
-                fish_data = self.cursor.fetchone()
+    async def search_fish(self, interaction: discord.Interaction, query: str = "", sort: str = None, filter_rarity: int = None):
+        try: # try parsing the query into an id
+            query = int(query)
+            self.cursor.execute("SELECT id, user_id, name, lore, rarity, size, value, biome, sold FROM infi_fish WHERE id = ?", (int(query),))
+            fish_data = self.cursor.fetchone()
 
-                if fish_data is None:
-                    await interaction.response.send_message("No fish was found with the provided query.", ephemeral=True)
-                    return
-                
-                id, user_id, name, lore, rarity, size, value, biome, sold = fish_data
+            if fish_data is None:
+                await interaction.response.send_message("No fish was found with the provided query.", ephemeral=True)
+                return
+            
+            id, user_id, name, lore, rarity, size, value, biome, sold = fish_data
 
-                embed = discord.Embed(
-                    title=f"{name} {':star:' * rarity}",
-                    description=f"*{lore}*",
-                    color=rarity_colors[rarity-1]
-                )
+            embed = discord.Embed(
+                title=f"{name} {':star:' * rarity}",
+                description=f"*{lore}*",
+                color=rarity_colors[rarity-1]
+            )
 
-                embed.add_field(name="Size", value=size)
-                embed.add_field(name="Value", value=f"${value:,}")
-                embed.add_field(name="Biome", value=biome.capitalize())
-                embed.add_field(name="Caught by", value=f"<@{user_id}>")
-                embed.add_field(name="Value", value=f"{'true' if sold else 'false'}")
+            embed.add_field(name="Size", value=size)
+            embed.add_field(name="Value", value=f"${value:,}")
+            embed.add_field(name="Biome", value=biome.capitalize())
+            embed.add_field(name="Caught by", value=f"<@{user_id}>")
+            embed.add_field(name="Sold", value=f"{'true' if sold else 'false'}")
 
-                embed.set_footer(text=f"ID: {id}")
+            embed.set_footer(text=f"ID: {id}")
 
-                await interaction.response.send_message(embed=embed)
+            await interaction.response.send_message(embed=embed)
 
-            except ValueError: # if query can't be parsed into an id
-                start_time = datetime.datetime.now()
+        except ValueError: # if query can't be parsed into an id
+            start_time = datetime.datetime.now()
 
-                self.cursor.execute("SELECT id, user_id, name, rarity FROM infi_fish WHERE name LIKE ?", (f"%{query}%",))
-                fish_data = self.cursor.fetchall()
+            self.cursor.execute("SELECT id, user_id, name, rarity FROM infi_fish WHERE name LIKE ?", (f"%{query}%",))
+            fish_data = self.cursor.fetchall()
 
-                end_time = datetime.datetime.now()
-                query_time = int((end_time - start_time).microseconds / 1000)
+            end_time = datetime.datetime.now()
+            query_time = int((end_time - start_time).microseconds / 1000)
 
-                description = ""
+            fish_data = sorted(fish_data, key=lambda x: x[0], reverse=True)
 
-                for entry in fish_data[:10]:
-                    id, user_id, name, rarity = entry
-                    description += f"{name} • {':star:'}{rarity} • <@{user_id}> • `#{id}`\n"
+            description = ""
 
-                embed = discord.Embed(
-                    title="Fish Search Results",
-                    description=description
-                )
-                embed.set_footer(text=f"Found {len(fish_data)} results in {query_time}ms")
+            for entry in fish_data[:10]:
+                id, user_id, name, rarity = entry
+                description += f"{name} • {':star:'}{rarity} • <@{user_id}> • `#{id}`\n"
 
-                await interaction.response.send_message(embed=embed)
-        except:
-            print(traceback.format_exc())
+            embed = discord.Embed(
+                title="Fish Search Results",
+                description=description
+            )
+            embed.set_footer(text=f"Found {len(fish_data)} results in {query_time}ms")
+
+            await interaction.response.send_message(embed=embed)
 
 
     @app_commands.command(name="list_users", description="List all fishing users")
     async def list_users(self, interaction: discord.Interaction):
-        try:
-            self.cursor.execute("SELECT * FROM infi_user")
-            user_data = self.cursor.fetchall()
+        self.cursor.execute("SELECT * FROM infi_user")
+        user_data = self.cursor.fetchall()
 
-            description = ""
-            for user in user_data:
-                id, level, xp, max_xp, balance, current_biome = user
-                description += f"<@{id}> • LVL {level} {xp}/{max_xp} • {balance} \n"
+        description = ""
+        for user in user_data:
+            id, level, xp, max_xp, balance, current_biome = user
+            description += f"<@{id}> • LVL {level} {xp}/{max_xp} • {balance} \n"
 
-            embed = discord.Embed(
-                title="User List",
-                description=description
-            )
-            
-            await interaction.response.send_message(embed=embed)
-        except:
-            traceback.print_exc()
+        embed = discord.Embed(
+            title="User List",
+            description=description
+        )
+        
+        await interaction.response.send_message(embed=embed)
 
 
 
@@ -397,6 +393,8 @@ class Fishing(commands.Cog):
 
         return bar_string
 
+
+    # xp growth algorithm
     def xp_required(self, level, base_xp=100, growth=15, scale=1.1):
         return int(base_xp + (level ** 2 * growth) + (level * scale * base_xp))
        

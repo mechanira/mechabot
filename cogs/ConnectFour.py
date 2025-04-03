@@ -5,6 +5,7 @@ import random
 import sqlite3
 import json
 
+
 def winCheck(grid) -> int:
     """Checks if a player has won."""
     for row in grid:
@@ -25,10 +26,12 @@ def winCheck(grid) -> int:
                 return grid[row + 3][col]
     return 0
 
+
 def displayGrid(grid) -> str:
     """Converts grid to an emoji-based string representation."""
     emoji_map = {0: ":black_large_square:", 1: ":red_circle:", 2: ":blue_circle:"}
     return "\n".join("".join(emoji_map[cell] for cell in row) for row in grid) + "\n:one::two::three::four::five::six::seven:"
+
 
 def drop_piece(grid, column, player):
     """Drops a piece into a column if possible."""
@@ -56,9 +59,11 @@ class ConnectFour(commands.Cog):
         """)
         self.conn.commit()
 
+
     @commands.Cog.listener()
     async def on_ready(self):
         print(f"{__name__} is online!")
+
 
     @app_commands.command(name="connectfour", description="Start a Connect Four game")
     async def connect_four(self, interaction: discord.Interaction, opponent: discord.User):
@@ -143,6 +148,7 @@ class ConnectFour(commands.Cog):
         except Exception as e:
             await interaction.response.send_message(f"An error occured: {e}", ephemeral=True)
 
+
     def render_board(self, grid, player1, player2, turn, winner=0):
         """Generates the game board as an embed."""
         embed = discord.Embed(
@@ -153,6 +159,7 @@ class ConnectFour(commands.Cog):
         embed.set_footer(text="Use /connectfour_place to drop a piece")
 
         return embed
+
 
 async def setup(bot):
     await bot.add_cog(ConnectFour(bot))

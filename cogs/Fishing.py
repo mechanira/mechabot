@@ -8,6 +8,7 @@ import json
 import sqlite3
 import traceback
 import datetime
+import asyncio
 
 xp_emojis = {
     "left_empty": "<:xp_right_empty:1351216992056639530>",
@@ -33,6 +34,7 @@ biome_level_requirements = {
 }
 
 rarity_colors = [
+    None,
     discord.Color.greyple(),
     discord.Color.green(),
     discord.Color.blue(),
@@ -96,6 +98,8 @@ class Fishing(commands.Cog):
                     "value": insert value of the catch in dollars, must be an integer
                     "xp": insert xp gain from the catch, must be an integer
                 }
+
+                If you catch a fish with a rarity of 0, that means you got a junk item. Junk is totally worthless, and can be generated uniquely in each biome.
                 """
             )
         )
@@ -126,8 +130,8 @@ class Fishing(commands.Cog):
             max_xp = 100
             current_biome = 'river'
             
-        weights = [1, 4, 20, 65, 195, 360]
-        rarity_levels = [6, 5, 4, 3, 2, 1]
+        weights = [1, 4, 20, 65, 195, 360, 100]
+        rarity_levels = [6, 5, 4, 3, 2, 1, 0]
         
         rarity = random.choices(rarity_levels, weights)[0]
 
@@ -137,7 +141,7 @@ class Fishing(commands.Cog):
         }
         print(payload)
 
-        response = self.model.generate_content(str(payload))
+        response = await asyncio.to_thread(self.model.generate_content, str(payload))
         print(response.text)
         response_dict = json.loads(response.text)
         fish_name, lore, size, value, xp_gain = (
@@ -171,21 +175,23 @@ class Fishing(commands.Cog):
             **Value:** ${value:,}
 
             {level_label}
-            {self.xp_bar(xp, max_xp)} {xp:,}/{max_xp:,} `+{xp_gain}`
+            {self.xp_bar(xp, max_xp)} {xp:,}/{max_xp:,} {f'`+{xp_gain}`' if rarity > 0 else ''}
             """,
-            color=rarity_colors[rarity-1]
+            color=rarity_colors[rarity]
         )
-        embed.set_footer(text=f"Biome: {current_biome} • ID: {fish_id}")
+        embed.set_footer(text=f"Biome: {current_biome} {f'• ID: {fish_id}' if rarity > 0 else ''}")
 
-        self.cursor.execute("""
-            INSERT INTO infi_user (id, level, xp, max_xp, current_biome) 
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET 
-                level = excluded.level,
-                xp = excluded.xp,
-                max_xp = excluded.max_xp,
-                current_biome = excluded.current_biome;
-        """, (user_id, level, xp, max_xp, current_biome))
+        if rarity > 0:
+            self.cursor.execute("""
+                INSERT INTO infi_user (id, level, xp, max_xp, current_biome) 
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET 
+                    level = excluded.level,
+                    xp = excluded.xp,
+                    max_xp = excluded.max_xp,
+                    current_biome = excluded.current_biome;
+            """, (user_id, level, xp, max_xp, current_biome))
+        
         self.conn.commit()
 
         await interaction.response.send_message(embed=embed)
@@ -283,7 +289,11 @@ class Fishing(commands.Cog):
 
 
     @app_commands.command(name="search_fish", description="Search for fish")
-    async def search_fish(self, interaction: discord.Interaction, query: str = "", sort: str = None, filter_rarity: int = None):
+    @app_commands.choices(sort=[
+        app_commands.Choice(name="Rarity (Ascending)", value="rarity_ascending"),
+        app_commands.Choice(name="Rarity (Descending)", value="rarity_descending")
+    ])
+    async def search_fish(self, interaction: discord.Interaction, query: str = "", sort: app_commands.Choice[str] = None, filter_rarity: int = None, page: int = None):
         try: # try parsing the query into an id
             query = int(query)
             self.cursor.execute("SELECT id, user_id, name, lore, rarity, size, value, biome, sold FROM infi_fish WHERE id = ?", (int(query),))
@@ -314,13 +324,21 @@ class Fishing(commands.Cog):
         except ValueError: # if query can't be parsed into an id
             start_time = datetime.datetime.now()
 
-            self.cursor.execute("SELECT id, user_id, name, rarity FROM infi_fish WHERE name LIKE ?", (f"%{query}%",))
+            if filter_rarity:
+                self.cursor.execute("SELECT id, user_id, name, rarity FROM infi_fish WHERE name LIKE ? AND rarity = ?", (f"%{query}%", filter_rarity))
+            else:
+                self.cursor.execute("SELECT id, user_id, name, rarity FROM infi_fish WHERE name LIKE ?", (f"%{query}%",))
             fish_data = self.cursor.fetchall()
 
             end_time = datetime.datetime.now()
             query_time = int((end_time - start_time).microseconds / 1000)
 
             fish_data = sorted(fish_data, key=lambda x: x[0], reverse=True)
+
+            if sort.value == "rarity_ascending":
+                fish_data = sorted(fish_data, key=lambda x: x[3], reverse=False)
+            elif sort.value == "rarity_descending":
+                fish_data = sorted(fish_data, key=lambda x: x[3], reverse=True)
 
             description = ""
 

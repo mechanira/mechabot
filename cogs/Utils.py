@@ -58,7 +58,7 @@ def uwuify(string: str):
     
 
 class Utils(commands.Cog):
-    def __init__(self, bot):
+    def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.uwuified = []
 
@@ -66,13 +66,14 @@ class Utils(commands.Cog):
     async def on_ready(self):
         print(f"{__name__} is online!")
 
+
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         try:
+            channel = message.channel
+
             if message.author.bot:
                 return
-            
-            channel = message.channel
 
             if message.author.id in self.uwuified:
                 webhooks = await channel.webhooks()

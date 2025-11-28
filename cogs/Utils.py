@@ -171,10 +171,35 @@ class Utils(commands.Cog):
 
     @app_commands.command(name="average_color", description="Gets the average color of an image")
     async def average_color(self, interaction: discord.Interaction, url: str):
+        avg_color, avg_color_hex = await self.get_average_color_hex(url)
+
+        solid_image = Image.new("RGB", (100, 100), avg_color)
+        image_buffer = BytesIO()
+        solid_image.save(image_buffer, format="PNG")
+        image_buffer.seek(0)
+        
+        file = discord.File(image_buffer, filename="average_color.png")
+
+        await interaction.response.send_message(f"The average color of the [image](<{url}>) is `{avg_color_hex}`.", file=file)
+
+
+    @app_commands.command(name="avatar", description="Gets the user's avatar")
+    async def average_color(self, interaction: discord.Interaction, user: discord.User=None):
+        user = user or interaction.user
+        avatar_url = user.display_avatar.url
+
+        avg_color, avg_color_hex = await self.get_average_color_hex(avatar_url)
+
+        embed = discord.Embed(title=f"{user.display_name}'s Avatar", url=avatar_url, color=discord.Color.from_rgb(*avg_color))
+        embed.set_image(url=avatar_url)
+
+        await interaction.response.send_message(embed=embed)
+
+    async def get_average_color_hex(self, url: str):
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as response:
                 if response.status != 200:
-                    await interaction.response.send_message("Failed to get image data.", ephemeral=True)
+                    return
 
                 img_data = await response.read()
                 image = Image.open(BytesIO(img_data))
@@ -184,14 +209,7 @@ class Utils(commands.Cog):
                 avg_color = tuple(map(int, np.mean(img_array, axis=(0, 1))))
                 avg_color_hex = "#{:02x}{:02x}{:02x}".format(*avg_color)
 
-                solid_image = Image.new("RGB", (100, 100), avg_color)
-                image_buffer = BytesIO()
-                solid_image.save(image_buffer, format="PNG")
-                image_buffer.seek(0)
-                
-                file = discord.File(image_buffer, filename="average_color.png")
-
-                await interaction.response.send_message(f"The average color of the [image](<{url}>) is `{avg_color_hex}`.", file=file)
+                return avg_color, avg_color_hex
 
 
 async def setup(bot):

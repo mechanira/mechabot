@@ -4,6 +4,19 @@ from discord import app_commands
 import random
 import sqlite3
 import json
+import logging
+from logging.handlers import TimedRotatingFileHandler
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+handler = TimedRotatingFileHandler(filename='logs/bot.log', encoding='utf-8', when='midnight', interval=1, backupCount=7)
+handler.setFormatter(logging.Formatter('[%(asctime)s] [%(levelname)s/%(name)s]: %(message)s'))
+logger.addHandler(handler)
+
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(logging.Formatter('[%(asctime)s] [%(levelname)s/%(name)s]: %(message)s'))
+logger.addHandler(console_handler)
 
 
 def winCheck(grid) -> int:
@@ -52,6 +65,7 @@ class ConnectFour(commands.Cog):
                 player1_id INTEGER NOT NULL,
                 player2_id INTEGER NOT NULL,
                 turn INTEGER NOT NULL,
+                selected_column INTEGER DEFAULT 1,
                 grid TEXT NOT NULL,
                 message_id INTEGER NOT NULL,
                 channel_id INTEGER NOT NULL
@@ -59,10 +73,9 @@ class ConnectFour(commands.Cog):
         """)
         self.conn.commit()
 
-
     @commands.Cog.listener()
     async def on_ready(self):
-        print(f"{__name__} is online!")
+        logger.info(f"{__name__} is online!")
 
 
     @app_commands.command(name="connectfour", description="Start a Connect Four game")
@@ -71,28 +84,33 @@ class ConnectFour(commands.Cog):
         player1 = interaction.user.id
         player2 = opponent.id
 
-        self.cursor.execute("DELETE FROM connect_four WHERE player1_id = ? OR player2_id = ?", (player1, player1))
-
         """
         if player1 == player2:
             await interaction.response.send_message("You cannot play against yourself!", ephemeral=True)
             return
+        """
 
         # Check if players are already in a game
         self.cursor.execute("SELECT game_id FROM connect_four WHERE player1_id IN (?, ?) OR player2_id IN (?, ?)", (player1, player2, player1, player2))
         if self.cursor.fetchone():
             await interaction.response.send_message("One of you is already in a game!", ephemeral=True)
+
+            self.cursor.execute("DELETE FROM connect_four WHERE player1_id IN (?, ?) OR player2_id IN (?, ?)", (player1, player2, player1, player2))
             return
-        """
 
         # Initialize game state
         grid = [[0] * 7 for _ in range(6)]
         turn = random.randint(1, 2)
 
-        await interaction.response.send_message(embed=self.render_board(grid, player1, player2, turn))
+        view = discord.ui.View()
+        view.add_item(discord.ui.Button(label="<", style=discord.ButtonStyle.primary, custom_id="cf_left"))
+        view.add_item(discord.ui.Button(label="Place", style=discord.ButtonStyle.primary, custom_id="cf_place"))
+        view.add_item(discord.ui.Button(label=">", style=discord.ButtonStyle.primary, custom_id="cf_right"))
+
+        await interaction.response.send_message(embed=render_board(grid, player1, player2, turn, 1), view=view)
         board_msg = await interaction.original_response()
 
-        self.cursor.execute("INSERT INTO connect_four (player1_id, player2_id, turn, grid, message_id, channel_id) VALUES (?, ?, ?, ?, ?, ?)",
+        self.cursor.execute("INSERT INTO connect_four (player1_id, player2_id, turn, selected_column, grid, message_id, channel_id) VALUES (?, ?, ?, ?, ?, ?)",
                             (player1, player2, turn, json.dumps(grid), board_msg.id, board_msg.channel.id))
         self.conn.commit()
 
@@ -104,14 +122,14 @@ class ConnectFour(commands.Cog):
             player_id = interaction.user.id
 
             # Get active game
-            self.cursor.execute("SELECT game_id, player1_id, player2_id, turn, grid, message_id, channel_id FROM connect_four WHERE player1_id = ? OR player2_id = ?", (player_id, player_id))
+            self.cursor.execute("SELECT game_id, player1_id, player2_id, turn, selected_column, grid, message_id, channel_id FROM connect_four WHERE player1_id = ? OR player2_id = ?", (player_id, player_id))
             game = self.cursor.fetchone()
 
             if not game:
                 await interaction.response.send_message("You are not in a game!", ephemeral=True)
                 return
 
-            game_id, player1, player2, turn, grid_str, message_id, channel_id = game
+            game_id, player1, player2, turn, selected_column, grid_str, message_id, channel_id = game
             grid = json.loads(grid_str)
 
             if (turn == 1 and player_id != player1) or (turn == 2 and player_id != player2):
@@ -139,7 +157,7 @@ class ConnectFour(commands.Cog):
 
             channel = await self.bot.fetch_channel(channel_id)
             message = await channel.fetch_message(message_id)
-            await message.edit(embed=self.render_board(grid, player1, player2, winner if winner else next_turn, winner))
+            await message.edit(embed=render_board(grid, player1, player2, winner if winner else next_turn, selected_column, winner))
 
             if winner:
                 await interaction.response.send_message(f"🎉 <@{player1 if winner == 1 else player2}> wins!", ephemeral=True)
@@ -149,17 +167,16 @@ class ConnectFour(commands.Cog):
             await interaction.response.send_message(f"An error occured: {e}", ephemeral=True)
 
 
-    def render_board(self, grid, player1, player2, turn, winner=0):
+async def setup(bot):
+    await bot.add_cog(ConnectFour(bot))
+
+def render_board(grid, player1, player2, turn, selected_column, winner=0):
         """Generates the game board as an embed."""
         embed = discord.Embed(
             title="Connect Four",
             color=discord.Color.green() if winner else discord.Color.red() if turn == 1 else discord.Color.blue())
         status_label = f"🎉 <@{player1 if winner == 1 else player2}> wins!" if winner else f"<@{player1 if turn == 1 else player2}>'s Turn {':red_circle:' if turn == 1 else ':blue_circle:'}"
-        embed.description = f"{status_label}\n{displayGrid(grid)}"
+        embed.description = f"{status_label}\n{displayGrid(grid)}\nSelected Column: `{selected_column}`"
         embed.set_footer(text="Use /connectfour_place to drop a piece")
 
         return embed
-
-
-async def setup(bot):
-    await bot.add_cog(ConnectFour(bot))

@@ -4,12 +4,25 @@ from discord.ext import commands
 from dotenv import load_dotenv
 import google.generativeai as genai
 import re
+import logging
+from logging.handlers import TimedRotatingFileHandler
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+handler = TimedRotatingFileHandler(filename='logs/bot.log', encoding='utf-8', when='midnight', interval=1, backupCount=7)
+handler.setFormatter(logging.Formatter('[%(asctime)s] [%(levelname)s/%(name)s]: %(message)s'))
+logger.addHandler(handler)
+
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(logging.Formatter('[%(asctime)s] [%(levelname)s/%(name)s]: %(message)s'))
+logger.addHandler(console_handler)
 
 class Chatbot(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.CHANNEL_ID = 1328122057254371429
-        self.chat = None
+        self.CHANNEL_ID = None
+        self.chat = None # chat cache
 
         load_dotenv()
 
@@ -35,9 +48,9 @@ class Chatbot(commands.Cog):
         try:
             history = await self.fetch_channel_history(self.CHANNEL_ID)
             self.chat = self.model.start_chat(history=history)
-            print(f"{__name__} is online!")
+            logger.info(f"{__name__} is online!")
         except Exception as e:
-            print(f"Error during on_ready: {e}")
+            logger.error(f"Error during on_ready: {e}")
 
 
     @commands.Cog.listener()
@@ -77,13 +90,15 @@ class Chatbot(commands.Cog):
 
             await message.reply(filtered_response)
         except Exception as e:
-            print(f"Error processing message: {e}")
+            logger.error(f"Error processing message: {e}")
 
 
     async def fetch_channel_history(self, channel_id):
         try:
             channel = await self.bot.fetch_channel(channel_id)
             history = []
+
+            logger.info("Fetching channel history")
 
             async for message in channel.history(limit=100, oldest_first=True):
                 if message.author.bot:
@@ -94,11 +109,12 @@ class Chatbot(commands.Cog):
                     parts = f"{message.author.name} ({message.author.display_name}): {message.content}"
 
                 history.append({"role": role, "parts": parts})
-                # print({"role": role, "parts": parts})
+
+                logger.debug({"role": role, "parts": parts})
 
             return history
         except Exception as e:
-            print(f"Error fetching channel history: {e}")
+            logger.error(f"Error fetching channel history: {e}")
             return []
 
 

@@ -13,6 +13,7 @@ __pycache__/
 *.ogg
 node_modules/
 *.db-journal
+logs/
 
 # Distribution / packaging
 .Python

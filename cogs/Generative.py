@@ -42,19 +42,14 @@ class Generative(commands.Cog):
     async def on_message(self, message: discord.Message):
         if message.author == self.bot.user:
             return
-        
-        self.cursor.execute(
-                "INSERT INTO generator_message_cache (id, channel_id, content) VALUES (?, ?, ?)",
-                (message.id, message.channel.id, message.content)
-            )
-        self.conn.commit()
 
         if self.bot.user in message.mentions or random.random() < 0.01:    
-            generated_message = self.generate_message(message.channel.id, max_words=20)
-            await message.channel.send(generated_message)   
+            generated_message = self.generate_message(message.channel.id, 100)
+            await message.channel.send(generated_message)
+            logger.debug("Generated message sent")
 
 
-    def generate_message(self, channel_id, max_words=20):
+    def generate_message(self, channel_id, max_words):
         messages = []
 
         self.cursor.execute(
@@ -74,13 +69,16 @@ class Generative(commands.Cog):
         w1, w2 = seed_pair
         output = [w1, w2]
 
-        for _ in range(random.randrange(1, max_words) - 2):
+        for _ in range(max_words - 2):
             pair = (w1, w2)
-            if pair not in trigram_probs:
+            if pair not in trigram_probs and random.random() < 0.5:
                 w1, w2 = random.choice(list(trigram_probs.keys()))
                 output.extend([w1, w2])
                 continue
-
+            
+            if pair not in trigram_probs:
+                break
+                
             next_words = trigram_probs[pair]
             words = list(next_words.keys())
             probs = list(next_words.values())
@@ -107,16 +105,16 @@ class Generative(commands.Cog):
         logger.debug(f"Starting message caching for channel: {channel.id}")
 
         self.cursor.execute(
-            "SELECT MAX(id), content FROM generator_message_cache WHERE channel_id = ?",
+            "SELECT MAX(id) FROM generator_message_cache WHERE channel_id = ?",
             (channel.id,)
         )
-        id = self.cursor.fetchone()[0]
+        result = self.cursor.fetchone()
+        id = result[0]
 
         logger.debug(f"Last cached message ID for channel {channel.id}: {id}")
+        
 
-        last_msg = await channel.fetch_message(id)
-
-        async for msg in channel.history(limit=None, after=None if forced else last_msg.id, oldest_first=True):
+        async for msg in channel.history(limit=None, after=None if forced else id, oldest_first=True):
             if msg.author == self.bot.user:
                 continue
             

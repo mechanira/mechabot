@@ -9,6 +9,19 @@ import sqlite3
 import traceback
 import datetime
 import asyncio
+import logging
+from logging.handlers import TimedRotatingFileHandler
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+handler = TimedRotatingFileHandler(filename='logs/bot.log', encoding='utf-8', when='midnight', interval=1, backupCount=7)
+handler.setFormatter(logging.Formatter('[%(asctime)s] [%(levelname)s/%(name)s]: %(message)s'))
+logger.addHandler(handler)
+
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(logging.Formatter('[%(asctime)s] [%(levelname)s/%(name)s]: %(message)s'))
+logger.addHandler(console_handler)
 
 xp_emojis = {
     "left_empty": "<:xp_right_empty:1351216992056639530>",
@@ -108,11 +121,12 @@ class Fishing(commands.Cog):
     @commands.Cog.listener()
     async def on_ready(self):
         try:
-            print(f"{__name__} is online!")
+            logger.info(f"{__name__} is online!")
         except Exception as e:
-            print(f"Error during on_ready: {e}")
+            logger.error(f"Error during on_ready: {e}")
     
     
+    @app_commands.checks.cooldown(1, 5.0, key=lambda i: (i.user.id))
     @app_commands.command(name="fish", description="Catch a fish!")
     async def fish(self, interaction: discord.Interaction):
         try:
@@ -138,11 +152,11 @@ class Fishing(commands.Cog):
                 "biome": current_biome,
                 "rarity": rarity
             }
-            print(payload)
+            logger.debug(f"Sending payload: {payload}")
 
             response = await asyncio.to_thread(self.model.generate_content, str(payload))
             response_json = response.text
-            print(response_json)
+            logger.debug(f"Retrieved fishing data: {response_json}")
 
             if response_json.startswith("```"):
                 response_json = response_json.strip("```json").strip("```").strip()
@@ -204,8 +218,13 @@ class Fishing(commands.Cog):
 
             await interaction.response.send_message(embed=embed)
         except Exception as e:
-            print(traceback.print_exc())
+            logger.error(f"An error occured: {e}")
             await interaction.response.send_message(f"An error occurred", ephemeral=True)
+
+    @fish.error
+    async def fish_error(self, interaction: discord.Interaction, error):
+        if isinstance(error, app_commands.CommandOnCooldown):
+            await interaction.response.send_message(f"You are on cooldown! Try again in {round(error.retry_after, 2)} seconds.", ephemeral=True)
 
 
     @app_commands.command(name="biomes", description="Change the fishing biome")
@@ -392,33 +411,28 @@ class Fishing(commands.Cog):
 
         bar_string = ""
 
-        # left bar
-        if filled_bars == 0:
-            if remaining > 0.5:
-                bar_string += xp_emojis["left_half"]
-            elif remaining > 0:
-                bar_string += xp_emojis["left_empty"]
-            else:
-                bar_string += xp_emojis["left_empty"]
-        else:
-            bar_string += xp_emojis["left_full"]
-
-        # middle bars
-        for i in range(1, length - 1):
+        for i in range(length):
             if i < filled_bars:
-                bar_string += xp_emojis["middle_full"]
+                if i == 0:
+                    bar_string += xp_emojis["left_full"]
+                elif i == length - 1:
+                    bar_string += xp_emojis["right_full"]
+                else:
+                    bar_string += xp_emojis["middle_full"]
             elif i == filled_bars and remaining >= 0.5:
-                bar_string += xp_emojis["middle_half"]
+                if i == 0:
+                    bar_string += xp_emojis["left_half"]
+                elif i == length - 1:
+                    bar_string += xp_emojis["right_half"]
+                else:
+                    bar_string += xp_emojis["middle_half"]
             else:
-                bar_string += xp_emojis["middle_empty"]
-
-        # right bar
-        if filled_bars >= length - 1:
-            bar_string += xp_emojis["right_full"]
-        elif filled_bars == length - 1 and remaining >= 0.5:
-            bar_string += xp_emojis["right_half"]
-        else:
-            bar_string += xp_emojis["right_empty"]
+                if i == 0:
+                    bar_string += xp_emojis["left_empty"]
+                elif i == length - 1:
+                    bar_string += xp_emojis["right_empty"]
+                else:
+                    bar_string += xp_emojis["middle_empty"]
 
         return bar_string
 

@@ -5,6 +5,19 @@ import re
 import time
 from datetime import datetime, timezone
 import sqlite3
+import logging
+from logging.handlers import TimedRotatingFileHandler
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+handler = TimedRotatingFileHandler(filename='logs/bot.log', encoding='utf-8', when='midnight', interval=1, backupCount=7)
+handler.setFormatter(logging.Formatter('[%(asctime)s] [%(levelname)s/%(name)s]: %(message)s'))
+logger.addHandler(handler)
+
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(logging.Formatter('[%(asctime)s] [%(levelname)s/%(name)s]: %(message)s'))
+logger.addHandler(console_handler)
 
 def parse_time(input_time: str) -> str:
     try:
@@ -53,7 +66,7 @@ class Reminder(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self):
-        print(f"{__name__} is online!")
+        logger.info(f"{__name__} is online!")
 
     def cog_unload(self):
         self.check_reminders.cancel()
@@ -99,7 +112,7 @@ class Reminder(commands.Cog):
                 f"**Will be sent to:** {'DM' if send_dm else 'here' if channel_id == interaction.channel_id else f'<#{channel_id}>'}"
             )
         except Exception as e:
-            print(e)
+            logger.error(f"An error occured: {e}")
 
 
     @app_commands.command(name="reminder_daily", description="Set a daily reminder for ")
@@ -132,11 +145,11 @@ class Reminder(commands.Cog):
             )
 
         except sqlite3.Error as e:
-            print(f"Database error: {e}")
+            logger.error(f"Database error: {e}")
             await interaction.response.send_message("There was an issue saving your reminder. Please try again later.", ephemeral=True)
 
         except Exception as e:
-            print(f"General error: {e}")
+            logger.error(f"General error: {e}")
             await interaction.response.send_message("Something went wrong. Please try again later.", ephemeral=True)
 
 
@@ -189,7 +202,7 @@ class Reminder(commands.Cog):
                 try:
                     await user.send(f"Reminder: **{label}** is due!")
                 except discord.Forbidden:
-                    print(f"Could not DM {user_id}, they might have DMs disabled.")
+                    logger.error(f"Could not DM {user_id}, they might have DMs disabled.")
             elif channel_id:
                 channel = self.bot.get_channel(channel_id)
                 if channel:
@@ -218,14 +231,14 @@ class Reminder(commands.Cog):
                 try:
                     await user.send(f"Daily Reminder: **{label}**")
                 except discord.Forbidden:
-                    print(f"Could not DM {user_id}, they might have DMs disabled.")
+                    logger.error(f"Could not DM {user_id}, they might have DMs disabled.")
             elif channel_id:
                 channel = self.bot.get_channel(channel_id)
                 if channel:
                     try:
                         await channel.send(f"<@{user_id}>, daily reminder: **{label}**")
                     except discord.Forbidden:
-                        print(f"Bot lacks permission to send messages in channel {channel_id}.")
+                        logger.error(f"Bot lacks permission to send messages in channel {channel_id}.")
 
 
 async def setup(bot):

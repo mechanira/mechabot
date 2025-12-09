@@ -6,6 +6,19 @@ import requests
 import os
 from pydub import AudioSegment
 import traceback
+import logging
+from logging.handlers import TimedRotatingFileHandler
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+handler = TimedRotatingFileHandler(filename='logs/bot.log', encoding='utf-8', when='midnight', interval=1, backupCount=7)
+handler.setFormatter(logging.Formatter('[%(asctime)s] [%(levelname)s/%(name)s]: %(message)s'))
+logger.addHandler(handler)
+
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(logging.Formatter('[%(asctime)s] [%(levelname)s/%(name)s]: %(message)s'))
+logger.addHandler(console_handler)
 
 class Voice(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -15,7 +28,7 @@ class Voice(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self):
-        print(f"{__name__} is online!")
+        logger.info(f"{__name__} is online!")
 
     """
     @commands.Cog.listener()
@@ -75,8 +88,8 @@ class Voice(commands.Cog):
             upload_url, uploaded_filename = self.request_url(interaction.channel.id)
             self.upload_audio_file(upload_url)
             self.send_voice_message(interaction.channel.id, uploaded_filename)
-        except:
-            print(traceback.print_exc())
+        except Exception as e:
+            logger.error(e)
 
 
     def generate_sam_voice(self, text):
@@ -137,7 +150,7 @@ class Voice(commands.Cog):
             response = requests.put(url, data=file, headers=headers)
 
             if response.status_code != 200:
-                print(f"Audio file upload failed: {response.status_code}, {response.text}")
+                logger.error(f"Audio file upload failed: {response.status_code}, {response.text}")
 
 
     def send_voice_message(self, channel_id, uploaded_filename):
@@ -164,11 +177,8 @@ class Voice(commands.Cog):
         response = requests.post(url, json=data, headers=headers)
 
         if response.status_code != 200:
-            print(f"Voice message eupload failed: {response.status_code}, {response.text}")
+            logger.error(f"Voice message upload failed: {response.status_code}, {response.text}")
 
-
-
-    
 
 async def setup(bot):
     await bot.add_cog(Voice(bot))

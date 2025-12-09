@@ -5,7 +5,19 @@ from yt_dlp import YoutubeDL
 import os
 import tempfile
 from io import BytesIO
+import logging
+from logging.handlers import TimedRotatingFileHandler
 
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+handler = TimedRotatingFileHandler(filename='logs/bot.log', encoding='utf-8', when='midnight', interval=1, backupCount=7)
+handler.setFormatter(logging.Formatter('[%(asctime)s] [%(levelname)s/%(name)s]: %(message)s'))
+logger.addHandler(handler)
+
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(logging.Formatter('[%(asctime)s] [%(levelname)s/%(name)s]: %(message)s'))
+logger.addHandler(console_handler)
 
 def yt_download_video(url):
     output_dir = "./downloads"
@@ -40,7 +52,7 @@ class Youtube(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self):
-        print(f"{__name__} is online!")
+        logger.info(f"{__name__} is online!")
     
     group = app_commands.Group(name="youtube", description="Youtube commands")
 
@@ -56,8 +68,10 @@ class Youtube(commands.Cog):
                 file = discord.File(video_bytes, filename=os.path.basename(video_path))
                 await interaction.followup.send(content="Video downloaded!", file=file)
 
+                os.remove(video_path)
+
         except Exception as e:
-            print("Error: {e}")
+            logger.error(e)
             await interaction.response.edit_message(f"An error occured while downloading: {e}")
 
 

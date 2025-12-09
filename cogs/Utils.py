@@ -9,6 +9,19 @@ import aiohttp
 import numpy as np
 from PIL import Image
 from io import BytesIO
+import logging
+from logging.handlers import TimedRotatingFileHandler
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+handler = TimedRotatingFileHandler(filename='logs/bot.log', encoding='utf-8', when='midnight', interval=1, backupCount=7)
+handler.setFormatter(logging.Formatter('[%(asctime)s] [%(levelname)s/%(name)s]: %(message)s'))
+logger.addHandler(handler)
+
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(logging.Formatter('[%(asctime)s] [%(levelname)s/%(name)s]: %(message)s'))
+logger.addHandler(console_handler)
 
 kaomoji = [">.<", ":3", "^-^", "^.^", ">w<", "^.~", "~.^", ">.<", "^o^", "^_^", ">.>", "^3^"]
 uwu_pattern = [
@@ -64,7 +77,7 @@ class Utils(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self):
-        print(f"{__name__} is online!")
+        logger.info(f"{__name__} is online!")
 
 
     @commands.Cog.listener()
@@ -83,7 +96,7 @@ class Utils(commands.Cog):
                     webhook = await channel.create_webhook(name="mechabot")
 
                 uwuified_message = uwuify(message.content)
-                print(uwuified_message)
+                logger.debug(f"Message uwuified: {uwuified_message}")
 
                 await message.delete()
                 await webhook.send(
@@ -101,8 +114,8 @@ class Utils(commands.Cog):
                 ]
 
                 await message.reply(random.choice(hungry_horse))
-        except:
-            print(traceback.print_exc())
+        except Exception as e:
+            logger.error(e)
 
 
     @app_commands.command(name="ping", description="Gets the API latency")
@@ -150,7 +163,7 @@ class Utils(commands.Cog):
 
             await interaction.response.send_message(selected_video[:-4], file=discord.File(video_path))
         except Exception as e:
-            print(e)
+            logger.error(e)
 
 
     @app_commands.command(name="meter", description="Create a random meter")
@@ -210,6 +223,13 @@ class Utils(commands.Cog):
                 avg_color_hex = "#{:02x}{:02x}{:02x}".format(*avg_color)
 
                 return avg_color, avg_color_hex
+            
+
+    # @app_commands.command(name="say", description="Make the bot say a message")
+    async def say_command(self, interaction: discord.Interaction, message: str):
+        await interaction.channel.send(message)
+
+        await interaction.response.send_message("Message sent!", ephemeral=True)
 
 
 async def setup(bot):

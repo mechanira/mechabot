@@ -4,8 +4,20 @@ from discord import app_commands
 import emoji
 import aiohttp
 import io
-import traceback
 import re
+import logging
+from logging.handlers import TimedRotatingFileHandler
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+handler = TimedRotatingFileHandler(filename='logs/bot.log', encoding='utf-8', when='midnight', interval=1, backupCount=7)
+handler.setFormatter(logging.Formatter('[%(asctime)s] [%(levelname)s/%(name)s]: %(message)s'))
+logger.addHandler(handler)
+
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(logging.Formatter('[%(asctime)s] [%(levelname)s/%(name)s]: %(message)s'))
+logger.addHandler(console_handler)
 
 class Emoji(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -14,7 +26,7 @@ class Emoji(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self):
-        print(f"{__name__} is online!")
+        logger.info(f"{__name__} is online!")
 
 
     group = app_commands.Group(name="emoji", description="...")
@@ -51,8 +63,8 @@ class Emoji(commands.Cog):
             if not emoji.is_emoji(x):
                 await interaction.response.send_message("Invalid emojis", ephemeral=True)
 
-        url = f"https://emojik.vercel.app/s/{emoji_1}_{emoji_2}?size=128"
-        print(url)
+        url = f"https://emoji-kitchen-api.vercel.app/mix/{emoji_1}/{emoji_2}"
+        logger.debug(url)
 
         try:
             async with aiohttp.ClientSession() as session:
@@ -64,7 +76,7 @@ class Emoji(commands.Cog):
                     else:
                         await interaction.response.send_message(f"Failed to fetch image.\nHTTP Status: {response.status}")
         except Exception as e:
-            print(f"An error occured: {e}")
+            logger.error(f"An error occured: {e}")
 
 
 async def setup(bot):

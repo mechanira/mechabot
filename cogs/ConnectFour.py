@@ -54,6 +54,134 @@ def drop_piece(grid, column, player):
             return True
     return False
 
+class ConnectFourUI(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+        logger.debug("ConnectFourUI class initialized")
+
+        self.conn = sqlite3.connect('data.db')
+        self.cursor = self.conn.cursor()
+
+        logger.debug("ConnectFourUI database connected")
+
+    @discord.ui.button(label="<", style=discord.ButtonStyle.primary)
+    async def cf_move_left(self, interaction: discord.Interaction, button: discord.ui.Button):
+        message_id = interaction.message.id
+        player_id = interaction.user.id
+
+        self.cursor.execute("SELECT * FROM connect_four WHERE message_id = ?", (message_id,))
+        game = self.cursor.fetchone()
+
+        game_id, player1_id, player2_id, turn, selected_column, grid, message_id, channel_id = game
+
+        selected_column -= 1
+
+        if not game:
+            await interaction.response.send_message("You are not in a game!", ephemeral=True)
+            return
+
+        grid = json.loads(grid)
+
+        if (turn == 1 and player_id != player1_id) or (turn == 2 and player_id != player2_id):
+            await interaction.response.send_message("It's not your turn!", ephemeral=True)
+            return
+
+        if selected_column < 1:
+            await interaction.response.send_message("Column out of range!", ephemeral=True)
+            return
+        
+        self.cursor.execute("UPDATE connect_four SET selected_column = ? WHERE game_id = ?", (selected_column, game_id,))
+        self.conn.commit()
+
+        await interaction.response.edit_message(embed=render_board(grid, player1_id, player2_id, turn, selected_column), view=self)
+
+
+    @discord.ui.button(label="Place", style=discord.ButtonStyle.primary)
+    async def cf_place(self, interaction: discord.Interaction, button: discord.ui.Button):
+        message_id = interaction.message.id
+        player_id = interaction.user.id
+
+        self.cursor.execute("SELECT * FROM connect_four WHERE message_id = ?", (message_id,))
+        game = self.cursor.fetchone()
+
+        game_id, player1_id, player2_id, turn, selected_column, grid, message_id, channel_id = game
+
+        if not game:
+            await interaction.response.send_message("You are not in a game!", ephemeral=True)
+            return
+
+        grid = json.loads(grid)
+
+        if (turn == 1 and player_id != player1_id) or (turn == 2 and player_id != player2_id):
+            await interaction.response.send_message("It's not your turn!", ephemeral=True)
+            return
+
+        if selected_column < 1 or selected_column > 7:
+            await interaction.response.send_message("Invalid column! Choose between 1 and 7.", ephemeral=True)
+            return
+
+        col_idx = selected_column - 1
+        if not drop_piece(grid, col_idx, turn):
+            await interaction.response.send_message("That column is full!", ephemeral=True)
+            return
+
+        winner = winCheck(grid)
+
+        next_turn = 1 if turn == 2 else 2
+
+        if winner == 0:
+            self.cursor.execute("UPDATE connect_four SET turn = ?, grid = ? WHERE game_id = ?", (next_turn, json.dumps(grid), game_id))
+        else:
+            self.cursor.execute("DELETE FROM connect_four WHERE game_id = ?", (game_id,))
+        self.conn.commit()
+
+        if winner:
+            await self.disable_all(interaction)
+
+            # await interaction.followup.send(f"🎉 <@{player1_id if winner == 1 else player2_id}> wins!", ephemeral=True)
+
+        await interaction.response.edit_message(embed=render_board(grid, player1_id, player2_id, winner if winner else next_turn, selected_column, winner), view=self)
+    
+
+    async def disable_all(self, interaction: discord.Interaction):
+        for item in self.children:
+            if isinstance(item, discord.ui.Button):
+                item.disabled = True
+
+
+    @discord.ui.button(label=">", style=discord.ButtonStyle.primary)
+    async def cf_move_right(self, interaction: discord.Interaction, button: discord.ui.Button):
+        message_id = interaction.message.id
+        player_id = interaction.user.id
+
+        self.cursor.execute("SELECT * FROM connect_four WHERE message_id = ?", (message_id,))
+        game = self.cursor.fetchone()
+
+        game_id, player1_id, player2_id, turn, selected_column, grid, message_id, channel_id = game
+
+        selected_column += 1
+
+        if not game:
+            await interaction.response.send_message("You are not in a game!", ephemeral=True)
+            return
+
+        grid = json.loads(grid)
+
+        if (turn == 1 and player_id != player1_id) or (turn == 2 and player_id != player2_id):
+            await interaction.response.send_message("It's not your turn!", ephemeral=True)
+            return
+
+        if selected_column > 7:
+            await interaction.response.send_message("Column out of range!", ephemeral=True)
+            return
+        
+        self.cursor.execute("UPDATE connect_four SET selected_column = ? WHERE game_id = ?", (selected_column, game_id,))
+        self.conn.commit()
+
+        await interaction.response.edit_message(embed=render_board(grid, player1_id, player2_id, turn, selected_column), view=self)
+
+
 class ConnectFour(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -93,78 +221,19 @@ class ConnectFour(commands.Cog):
         # Check if players are already in a game
         self.cursor.execute("SELECT game_id FROM connect_four WHERE player1_id IN (?, ?) OR player2_id IN (?, ?)", (player1, player2, player1, player2))
         if self.cursor.fetchone():
-            await interaction.response.send_message("One of you is already in a game!", ephemeral=True)
-
             self.cursor.execute("DELETE FROM connect_four WHERE player1_id IN (?, ?) OR player2_id IN (?, ?)", (player1, player2, player1, player2))
-            return
 
         # Initialize game state
         grid = [[0] * 7 for _ in range(6)]
         turn = random.randint(1, 2)
 
-        view = discord.ui.View()
-        view.add_item(discord.ui.Button(label="<", style=discord.ButtonStyle.primary, custom_id="cf_left"))
-        view.add_item(discord.ui.Button(label="Place", style=discord.ButtonStyle.primary, custom_id="cf_place"))
-        view.add_item(discord.ui.Button(label=">", style=discord.ButtonStyle.primary, custom_id="cf_right"))
-
+        view = ConnectFourUI()
         await interaction.response.send_message(embed=render_board(grid, player1, player2, turn, 1), view=view)
         board_msg = await interaction.original_response()
 
-        self.cursor.execute("INSERT INTO connect_four (player1_id, player2_id, turn, selected_column, grid, message_id, channel_id) VALUES (?, ?, ?, ?, ?, ?)",
-                            (player1, player2, turn, json.dumps(grid), board_msg.id, board_msg.channel.id))
+        self.cursor.execute("INSERT INTO connect_four (player1_id, player2_id, turn, selected_column, grid, message_id, channel_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                            (player1, player2, turn, 1, json.dumps(grid), board_msg.id, board_msg.channel.id))
         self.conn.commit()
-
-
-    @app_commands.command(name="connectfour_place", description="Drop a piece in a column")
-    async def connect_four_place(self, interaction: discord.Interaction, column: int):
-        try:
-            """Handles piece placement."""
-            player_id = interaction.user.id
-
-            # Get active game
-            self.cursor.execute("SELECT game_id, player1_id, player2_id, turn, selected_column, grid, message_id, channel_id FROM connect_four WHERE player1_id = ? OR player2_id = ?", (player_id, player_id))
-            game = self.cursor.fetchone()
-
-            if not game:
-                await interaction.response.send_message("You are not in a game!", ephemeral=True)
-                return
-
-            game_id, player1, player2, turn, selected_column, grid_str, message_id, channel_id = game
-            grid = json.loads(grid_str)
-
-            if (turn == 1 and player_id != player1) or (turn == 2 and player_id != player2):
-                await interaction.response.send_message("It's not your turn!", ephemeral=True)
-                return
-
-            if column < 1 or column > 7:
-                await interaction.response.send_message("Invalid column! Choose between 1 and 7.", ephemeral=True)
-                return
-
-            col_idx = column - 1
-            if not drop_piece(grid, col_idx, turn):
-                await interaction.response.send_message("That column is full!", ephemeral=True)
-                return
-
-            winner = winCheck(grid)
-
-            next_turn = 1 if turn == 2 else 2
-
-            if winner == 0:
-                self.cursor.execute("UPDATE connect_four SET turn = ?, grid = ? WHERE game_id = ?", (next_turn, json.dumps(grid), game_id))
-            else:
-                self.cursor.execute("DELETE FROM connect_four WHERE game_id = ?", (game_id,))
-            self.conn.commit()
-
-            channel = await self.bot.fetch_channel(channel_id)
-            message = await channel.fetch_message(message_id)
-            await message.edit(embed=render_board(grid, player1, player2, winner if winner else next_turn, selected_column, winner))
-
-            if winner:
-                await interaction.response.send_message(f"🎉 <@{player1 if winner == 1 else player2}> wins!", ephemeral=True)
-            else:
-                await interaction.response.send_message(f"Move placed in column `{column}`", ephemeral=True)
-        except Exception as e:
-            await interaction.response.send_message(f"An error occured: {e}", ephemeral=True)
 
 
 async def setup(bot):

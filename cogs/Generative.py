@@ -7,6 +7,7 @@ import re
 from collections import defaultdict, Counter
 import logging
 from logging.handlers import TimedRotatingFileHandler
+import math
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -49,7 +50,7 @@ class Generative(commands.Cog):
             logger.debug("Generated message sent")
 
 
-    def generate_message(self, channel_id, max_words):
+    def generate_message(self, channel_id, max_words, temperature=1.5):
         messages = []
 
         self.cursor.execute(
@@ -78,10 +79,13 @@ class Generative(commands.Cog):
             
             if pair not in trigram_probs:
                 break
-                
+
             next_words = trigram_probs[pair]
-            words = list(next_words.keys())
-            probs = list(next_words.values())
+            
+            tempered = self.apply_temperature(next_words, temperature)
+
+            words = list(tempered.keys())
+            probs = list(tempered.values())
 
             # Weighted random choice using trigram probabilities
             w3 = random.choices(words, weights=probs, k=1)[0]
@@ -101,7 +105,8 @@ class Generative(commands.Cog):
         await self.cache_channel(interaction.channel, force)
         await interaction.followup.send("Message caching complete!", ephemeral=True)
 
-    async def cache_channel(self, channel: discord.TextChannel, forced: bool = False):
+
+    async def cache_channel(self, channel: discord.TextChannel = None, forced: bool = False):
         logger.debug(f"Starting message caching for channel: {channel.id}")
 
         self.cursor.execute(
@@ -115,7 +120,7 @@ class Generative(commands.Cog):
         
 
         async for msg in channel.history(limit=None, after=None if forced else id, oldest_first=True):
-            if msg.author == self.bot.user:
+            if msg.author.bot:
                 continue
             
             self.cursor.execute(
@@ -124,7 +129,23 @@ class Generative(commands.Cog):
             )
             self.conn.commit()
 
-        logger.debug(f"Cached messages for channel {channel.id}")
+        logger.info(f"Cached messages for channel {channel.id}")
+
+
+    @commands.has_permissions(manage_messages=True)
+    @app_commands.command(name="delete_cache", description="Deletes the message generation cache for this channel")
+    async def delete_cache_command(self, interaction: discord.Interaction, channel: discord.TextChannel = None):
+        if channel == None:
+            channel = interaction.channel
+
+        self.cursor.execute(
+            "DELETE FROM generator_message_cache WHERE channel_id = ?",
+            (channel.id,)
+        )
+        self.conn.commit()
+
+        logger.info(f"Deleted message generation cache for channel: {channel.id}")
+        await interaction.response.send_message("Deleted message generation cache", ephemeral=True)
 
 
     def build_trigram_counts(self, messages):
@@ -157,6 +178,23 @@ class Generative(commands.Cog):
         text = re.sub(EMOJI_REGEX, '', text)
         
         return re.findall(WORD_REGEX, text.lower())
+    
+    
+    def apply_temperature(self, probs, temperature):
+        if temperature <= 0:
+            # deterministic (argmax)
+            max_word = max(probs, key=probs.get)
+            return {max_word: 1.0}
+
+        # Adjust probabilities
+        adjusted = {
+            w: math.pow(p, 1.0 / temperature)
+            for w, p in probs.items()
+        }
+
+        # Normalize
+        total = sum(adjusted.values())
+        return {w: p / total for w, p in adjusted.items()}
 
 async def setup(bot):
     await bot.add_cog(Generative(bot))

@@ -184,7 +184,7 @@ class Utils(commands.Cog):
 
     @app_commands.command(name="average_color", description="Gets the average color of an image")
     async def average_color(self, interaction: discord.Interaction, url: str):
-        avg_color, avg_color_hex = await self.get_average_color_hex(url)
+        avg_color, avg_color_hex = await self.get_average_color(url)
 
         solid_image = Image.new("RGB", (100, 100), avg_color)
         image_buffer = BytesIO()
@@ -201,14 +201,29 @@ class Utils(commands.Cog):
         user = user or interaction.user
         avatar_url = user.display_avatar.url
 
-        avg_color, avg_color_hex = await self.get_average_color_hex(avatar_url)
+        avg_color, avg_color_hex = await self.get_average_color(avatar_url)
 
         embed = discord.Embed(title=f"{user.display_name}'s Avatar", url=avatar_url, color=discord.Color.from_rgb(*avg_color))
         embed.set_image(url=avatar_url)
 
         await interaction.response.send_message(embed=embed)
 
-    async def get_average_color_hex(self, url: str):
+
+    @app_commands.command(name="average_color", description="Gets the average color of an image")
+    async def average_color_command(self, interaction: discord.Interaction, url: str):
+        avg_color, avg_color_hex = await self.get_average_color(url)
+
+        solid_image = Image.new("RGB", (256, 256), avg_color)
+        image_buffer = BytesIO()
+        solid_image.save(image_buffer, format="PNG")
+        image_buffer.seek(0)
+        
+        file = discord.File(image_buffer, filename=f"mechabot_average_color_{interaction.id}.png")
+
+        await interaction.response.send_message(f"Average color of [image]({url}) is `{avg_color_hex}`", file=file)
+
+
+    async def get_average_color(self, url: str):
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as response:
                 if response.status != 200:
@@ -225,10 +240,16 @@ class Utils(commands.Cog):
                 return avg_color, avg_color_hex
             
 
-    # @app_commands.command(name="say", description="Make the bot say a message")
-    async def say_command(self, interaction: discord.Interaction, message: str):
-        await interaction.channel.send(message)
+    @app_commands.command(name="say", description="Send a message via the bot")
+    async def say_command(self, interaction: discord.Interaction, content: str = None, file: discord.Attachment = None):
+        if interaction.user.id != 425661467904180224:
+            await interaction.response.send_message("You do not have permission to use this command!", ephemeral=True)
+            return
+        
+        if file != None:
+            file = await file.to_file()
 
+        await interaction.channel.send(content, file=file)
         await interaction.response.send_message("Message sent!", ephemeral=True)
 
 

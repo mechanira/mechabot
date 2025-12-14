@@ -11,7 +11,8 @@ load_dotenv()
 
 bot = commands.Bot(command_prefix="m.",
                    intents=discord.Intents.all(),
-                   allowed_contexts=discord.app_commands.AppCommandContext(guild=True, dm_channel=True, private_channel=True)
+                   allowed_contexts=discord.app_commands.AppCommandContext(guild=True, dm_channel=True, private_channel=True),
+                   activity=discord.Game(name=os.getenv("BOT_STATUS"))
                    )
 
 os.makedirs("logs", exist_ok=True)
@@ -45,6 +46,10 @@ async def on_app_command_error(interaction: discord.Interaction, error: discord.
         await interaction.response.send_message("You don't have permission to use this command!", ephemeral=True)
     else:
         await interaction.response.send_message("An unexpected error occurred.", ephemeral=True)
+
+@bot.event
+async def on_interaction(interaction):
+    logger.debug(f"Interaction received! {interaction.type}")
 
 @bot.event
 async def on_error(event: str, *args, **kwargs):

@@ -5,7 +5,8 @@ import subprocess
 import requests
 import os
 from pydub import AudioSegment
-import traceback
+import asyncio
+import yt_dlp
 import logging
 from logging.handlers import TimedRotatingFileHandler
 
@@ -24,7 +25,6 @@ class Voice(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.voice_clients = {}
-        self.sam_whitelist = [425661467904180224]
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -72,6 +72,55 @@ class Voice(commands.Cog):
             await interaction.response.send_message("Left the voice channel!", ephemeral=True)
         else:
             await interaction.response.send_message("I'm not in a voice channel!", ephemeral=True)
+
+
+    @app_commands.command(name="play", description="Play audio in a VC")
+    async def play_command(self, interaction: discord.Interaction, url: str):
+        await interaction.response.defer(ephemeral=True)
+
+        guild_id = interaction.guild_id
+        if interaction.user.voice:
+            if guild_id in self.voice_clients and self.voice_clients[guild_id].is_connected():
+                pass
+
+            channel = interaction.user.voice.channel
+            
+            self.voice_clients[guild_id] = await channel.connect()
+        else:
+            await interaction.response.send_message("You need to be in a voice channel first!")
+            return
+
+        filename = "downloads/ytdl"
+        cookies_path = "./assets/youtube_cookies.txt"
+
+        logger.info(f"Cookies exists: {os.path.exists(cookies_path)}")
+        logger.info(f"Cookies size: {os.path.getsize(cookies_path)}")
+
+        ydl_opts = {
+            "format": "bestaudio[abr<=50]/bestaudio/best",
+            "postprocessors": [
+                {
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "mp3",
+                    "preferredquality": "192",
+                }
+            ],
+            "cookies": cookies_path,
+            "outtmpl": filename,
+            "quiet": True,
+        }
+
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                title = info.get("title", "Unknown Title")
+        except Exception as e:
+            return await interaction.followup.send(f"Error: `{e}`")
+        
+        source = discord.FFmpegPCMAudio(filename + ".mp3")
+        self.voice_clients[interaction.guild_id].play(source, after=lambda e: print(f'Player error: {e}') if e else None)
+
+        await interaction.channel.send(f"Playing **{title}**")
 
 
     @app_commands.command(name="sam", description="Software Automatic Mouth (SAM) text-to-speech")

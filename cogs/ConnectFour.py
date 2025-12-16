@@ -6,6 +6,8 @@ import sqlite3
 import json
 import logging
 from logging.handlers import TimedRotatingFileHandler
+import re
+import asyncio
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -234,6 +236,56 @@ class ConnectFourUI(discord.ui.View):
         await interaction.response.edit_message(embed=render_board(grid, player1_id, player2_id, turn, selected_column), view=self)
 
 
+class ConnectFourRequestUI(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=300)
+
+        self.conn = sqlite3.connect('data.db')
+        self.cursor = self.conn.cursor()
+
+
+    @discord.ui.button(label="Accept", style=discord.ButtonStyle.success)
+    async def cf_accept(self, interaction: discord.Interaction, button: discord.ui.Button):
+        id_pattern = r'<@(\d*)>'
+        opponent_id = int(re.findall(id_pattern, interaction.message.content)[0])
+
+        if interaction.user.id != opponent_id:
+            await interaction.response.send_message("You can't use this interaction!", ephemeral=True)
+            return
+
+        player1 = interaction.message.interaction_metadata.user.id
+        player2 = opponent_id
+
+        # Check if players are already in a game
+        self.cursor.execute("SELECT game_id FROM connect_four WHERE player1_id IN (?, ?) OR player2_id IN (?, ?)", (player1, player2, player1, player2))
+        if self.cursor.fetchone():
+            self.cursor.execute("DELETE FROM connect_four WHERE player1_id IN (?, ?) OR player2_id IN (?, ?)", (player1, player2, player1, player2))
+
+        # Initialize game state
+        grid = [[0] * 7 for _ in range(6)]
+        turn = random.randint(1, 2)
+
+        view = ConnectFourUI()
+        await interaction.response.edit_message(embed=render_board(grid, player1, player2, turn, 1), view=view)
+        board_msg = interaction.message
+
+        self.cursor.execute("INSERT INTO connect_four (player1_id, player2_id, turn, selected_column, grid, message_id, channel_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                            (player1, player2, turn, 1, json.dumps(grid), board_msg.id, board_msg.channel.id))
+        self.conn.commit()
+
+
+    @discord.ui.button(label="Decline", style=discord.ButtonStyle.danger)
+    async def cf_decline(self, interaction: discord.Interaction, button: discord.ui.Button):
+        id_pattern = r'<@(\d*)>'
+        opponent_id = int(re.findall(id_pattern, interaction.message.content)[0])
+
+        if interaction.user.id != opponent_id:
+            await interaction.response.send_message("You can't use this interaction!", ephemeral=True)
+            return
+        
+        await interaction.response.edit_message(content=f"{interaction.message.content}\n*User declined the game invitation!*", view=None)
+
+
 class ConnectFour(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -270,31 +322,15 @@ class ConnectFour(commands.Cog):
     @app_commands.command(name="connectfour", description="Start a Connect Four game")
     async def connect_four(self, interaction: discord.Interaction, opponent: discord.User):
         """Starts a new Connect Four game."""
-        player1 = interaction.user.id
-        player2 = opponent.id
-
-        """
-        if player1 == player2:
+        if interaction.user == opponent:
             await interaction.response.send_message("You cannot play against yourself!", ephemeral=True)
             return
-        """
 
-        # Check if players are already in a game
-        self.cursor.execute("SELECT game_id FROM connect_four WHERE player1_id IN (?, ?) OR player2_id IN (?, ?)", (player1, player2, player1, player2))
-        if self.cursor.fetchone():
-            self.cursor.execute("DELETE FROM connect_four WHERE player1_id IN (?, ?) OR player2_id IN (?, ?)", (player1, player2, player1, player2))
+        await interaction.response.send_message(f"{opponent.mention} **{interaction.user.name}** has invited you to a Connect Four match. Would you like to join?", view=ConnectFourRequestUI())
 
-        # Initialize game state
-        grid = [[0] * 7 for _ in range(6)]
-        turn = random.randint(1, 2)
+        await asyncio.sleep(300)
 
-        view = ConnectFourUI()
-        await interaction.response.send_message(embed=render_board(grid, player1, player2, turn, 1), view=view)
-        board_msg = await interaction.original_response()
-
-        self.cursor.execute("INSERT INTO connect_four (player1_id, player2_id, turn, selected_column, grid, message_id, channel_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                            (player1, player2, turn, 1, json.dumps(grid), board_msg.id, board_msg.channel.id))
-        self.conn.commit()
+        await interaction.response.edit_message
 
     
     @app_commands.command(name="connectfour_stats", description="Check your Connect Four stats")

@@ -58,12 +58,9 @@ class ConnectFourUI(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-        logger.debug("ConnectFourUI class initialized")
-
         self.conn = sqlite3.connect('data.db')
         self.cursor = self.conn.cursor()
 
-        logger.debug("ConnectFourUI database connected")
 
     @discord.ui.button(label="<", style=discord.ButtonStyle.primary)
     async def cf_move_left(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -137,12 +134,67 @@ class ConnectFourUI(discord.ui.View):
         self.conn.commit()
 
         if winner:
-            await self.disable_all(interaction)
+            await self.disable_all(interaction) # disables the ui
+
+            player_a = get_or_create_player(self.cursor, player1_id)
+            player_b = get_or_create_player(self.cursor, player2_id)
+
+            id_a, rating_a, games_played_a, wins_a, losses_a = player_a
+            id_b, rating_b, games_played_b, wins_b, losses_b = player_b
+
+            k_a = k_factor(games_played_a)
+            k_b = k_factor(games_played_b)
+
+            if winner == 1:
+                result_a = 1
+            elif winner == 2:
+                result_a = 0
+            else:
+                result_a = 0.5
+
+            new_rating_a, new_rating_b = update_ratings(
+                rating_a, rating_b, result_a, k_a, k_b
+            )
+
+            new_rating_a = round(new_rating_a)
+            new_rating_b = round(new_rating_b)
+
+            games_played_a += 1
+            games_played_b += 1
+
+            if winner == 1:
+                wins_a += 1
+                losses_b += 1
+            elif winner == 2:
+                wins_b += 1
+                losses_a += 1
+
+            self.cursor.execute("""
+                INSERT INTO connect_four_user (id, rating, games_played, wins, losses)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    rating = excluded.rating,
+                    games_played = excluded.games_played,
+                    wins = excluded.wins,
+                    losses = excluded.losses;
+            """, (player1_id, new_rating_a, games_played_a, wins_a, losses_a))
+
+            self.cursor.execute("""
+                INSERT INTO connect_four_user (id, rating, games_played, wins, losses)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    rating = excluded.rating,
+                    games_played = excluded.games_played,
+                    wins = excluded.wins,
+                    losses = excluded.losses;
+            """, (player2_id, new_rating_b, games_played_b, wins_b, losses_b))
+
+            self.conn.commit()
 
             # await interaction.followup.send(f"🎉 <@{player1_id if winner == 1 else player2_id}> wins!", ephemeral=True)
 
         await interaction.response.edit_message(embed=render_board(grid, player1_id, player2_id, winner if winner else next_turn, selected_column, winner), view=self)
-    
+
 
     async def disable_all(self, interaction: discord.Interaction):
         for item in self.children:
@@ -199,6 +251,15 @@ class ConnectFour(commands.Cog):
                 channel_id INTEGER NOT NULL
             )
         """)
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS connect_four_user (
+                id INTEGER PRIMARY KEY,
+                rating INTEGER NOT NULL DEFAULT 100,
+                games_played INTEGER NOT NULL DEFAULT 0,
+                wins INTEGER NOT NULL DEFAULT 0,
+                losses INTEGER NOT NULL DEFAULT 0
+            )
+        """)
         self.conn.commit()
 
     @commands.Cog.listener()
@@ -235,6 +296,53 @@ class ConnectFour(commands.Cog):
                             (player1, player2, turn, 1, json.dumps(grid), board_msg.id, board_msg.channel.id))
         self.conn.commit()
 
+    
+    @app_commands.command(name="connectfour_stats", description="Check your Connect Four stats")
+    async def connect_four_stats_command(self, interaction: discord.Interaction):
+        id, rating, games_played, wins, losses = get_or_create_player(self.cursor, interaction.user.id)
+        
+        embed = discord.Embed(
+            title=f"{interaction.user.display_name}'s Connect Four stats",
+            description=f"""
+                Rating: `{rating}`
+                Games played: `{games_played}`
+                Wins: `{wins}`
+                Losses: `{losses}`
+            """
+        )
+
+        await interaction.response.send_message(embed=embed)
+
+    
+    @app_commands.command(name="connectfour_leaderboard", description="Shows the top Connect 4 players")
+    async def connect_four_leaderboard_command(self, interaction: discord.Interaction):
+        self.cursor.execute("SELECT * FROM connect_four_user")
+        user_data = self.cursor.fetchall()
+
+        user_data = sorted(user_data, key=lambda x: x[1], reverse=True)
+
+        emoji_list = [":first_place:", ":second_place:", ":third_place:"]
+
+        description = ""
+        i = 1
+        for user in user_data:
+            placement_index = emoji_list[i-1] if i <= 3 else f"#{i}" 
+
+            id, rating, games_played, wins, losses = user
+            description += f"{placement_index} <@{id}> `{rating}`\n"
+
+            if i >= 10:
+                break
+
+            i += 1
+
+        embed = discord.Embed(
+            title="Connect 4 Leaderboard",
+            description=description
+        )
+        
+        await interaction.response.send_message(embed=embed)
+
 
 async def setup(bot):
     await bot.add_cog(ConnectFour(bot))
@@ -246,6 +354,35 @@ def render_board(grid, player1, player2, turn, selected_column, winner=0):
             color=discord.Color.green() if winner else discord.Color.red() if turn == 1 else discord.Color.blue())
         status_label = f"🎉 <@{player1 if winner == 1 else player2}> wins!" if winner else f"<@{player1 if turn == 1 else player2}>'s Turn {':red_circle:' if turn == 1 else ':blue_circle:'}"
         embed.description = f"{status_label}\n{displayGrid(grid)}\nSelected Column: `{selected_column}`"
-        embed.set_footer(text="Use /connectfour_place to drop a piece")
 
         return embed
+
+def update_ratings(rating_a, rating_b, result_a, k_a=32, k_b=32):
+    expected_a = expected_a = 1 / (1 + 10 ** ((rating_b - rating_a) / 400))
+    expected_b = 1 - expected_a
+
+    new_rating_a = max(0, rating_a + k_a * (result_a - expected_a))
+    new_rating_b = max(0, rating_b + k_b * ((1 - result_a) - expected_b))
+
+    return new_rating_a, new_rating_b
+
+def get_or_create_player(cursor, player_id):
+    cursor.execute(
+        "SELECT id, rating, games_played, wins, losses FROM connect_four_user WHERE id = ?",
+        (player_id,)
+    )
+    row = cursor.fetchone()
+
+    if row is None:
+        cursor.execute("INSERT INTO connect_four_user (id) VALUES (?)", (player_id,))
+        return player_id, 100, 0, 0, 0
+
+    return row
+
+def k_factor(games_played):
+    if games_played < 5:
+        return 60
+    elif games_played < 30:
+        return 40
+    else:
+        return 20

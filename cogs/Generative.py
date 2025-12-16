@@ -44,9 +44,9 @@ class Generative(commands.Cog):
         if message.author == self.bot.user:
             return
 
-        if self.bot.user in message.mentions or random.random() < 0.01:    
+        if self.bot.user in message.mentions or random.random() < 0.002:    
             generated_message = self.generate_message(message.channel.id, 100)
-            await message.channel.send(generated_message)
+            await message.channel.send(generated_message, allowed_mentions=discord.AllowedMentions.none())
             logger.debug("Generated message sent")
 
 

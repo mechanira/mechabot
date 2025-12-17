@@ -2,15 +2,20 @@ const SamJs = require("sam-js");
 const fs = require("fs");
 
 async function synthesizeSAM(text, outputFile, volume = 0.5) {
-    let sam = new SamJs();
-    const rawBuffer = sam.buf8(text);
+    try {
+        let sam = new SamJs({});
+        const rawBuffer = sam.buf8(text);
 
-    const adjustedBuffer = adjustVolume(rawBuffer, volume);
+        const adjustedBuffer = adjustVolume(rawBuffer, volume);
 
-    const wavBuffer = createWavBuffer(adjustedBuffer, 22050, 1, 8);
+        const wavBuffer = createWavBuffer(adjustedBuffer, 22050, 1, 8);
 
-    fs.writeFileSync(outputFile, wavBuffer);
-    console.log(`WAV file saved: ${outputFile} with volume: ${volume}`);
+        fs.writeFileSync(outputFile, wavBuffer);
+    }
+    catch (e) {
+        console.error(e)
+    }
+
 }
 
 function adjustVolume(buffer, volume) {
@@ -46,5 +51,6 @@ function createWavBuffer(rawBuffer, sampleRate, numChannels, bitDepth) {
 }
 
 const text = process.argv[2] || "sam fallback response";
-const volume = parseFloat(process.argv[3]) || 0.5;
-synthesizeSAM(text, "sam_output.wav", volume);
+const output_path = process.argv[3] || "sam_output.wav"
+const volume = 0.5;
+synthesizeSAM(text, output_path, volume);

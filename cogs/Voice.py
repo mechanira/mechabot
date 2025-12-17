@@ -125,26 +125,20 @@ class Voice(commands.Cog):
 
     @app_commands.command(name="sam", description="Software Automatic Mouth (SAM) text-to-speech")
     async def sam(self, interaction: discord.Interaction, text: str, voice_message: bool = False):
-        try:
-            output_file = self.generate_sam_voice(text)
-            file = discord.File(output_file, filename=f"sam_tts_{interaction.id}.wav")
+        output_file = self.generate_sam_voice(text, f"sam_{interaction.id}.wav")
+        file = discord.File(output_file, filename=output_file)
 
-            await interaction.response.send_message(file=file, ephemeral=voice_message)
+        await interaction.response.send_message(file=file, ephemeral=voice_message)
 
-            if not voice_message:
-                return
-
+        if voice_message:
             upload_url, uploaded_filename = self.request_url(interaction.channel.id)
             self.upload_audio_file(upload_url)
             self.send_voice_message(interaction.channel.id, uploaded_filename)
-        except Exception as e:
-            logger.error(e)
 
 
-    def generate_sam_voice(self, text):
-        output_file = "sam_output.wav"
-        subprocess.run(["node", "sam_tts.js", text])
-        return output_file
+    def generate_sam_voice(self, text, output_path):
+        subprocess.run(["node", "sam_tts.js", text, output_path])
+        return output_path
     
 
     def request_url(self, channel_id):

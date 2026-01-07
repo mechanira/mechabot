@@ -11,6 +11,8 @@ from PIL import Image
 from io import BytesIO
 import logging
 from logging.handlers import TimedRotatingFileHandler
+from petpetgif import petpet
+import sqlite3
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -34,6 +36,8 @@ uwu_pattern = [
 ]
 stutter_chance = 0.25
 kaomoji_chance = 0.25
+
+meows = ["meow", "nya", "mrow", "mrrp"]
 
 def uwuify(string: str):
     words = string.split(' ')
@@ -75,6 +79,9 @@ class Utils(commands.Cog):
         self.bot = bot
         self.uwuified = []
 
+        self.conn = sqlite3.connect('data.db')
+        self.cursor = self.conn.cursor()
+
     @commands.Cog.listener()
     async def on_ready(self):
         logger.info(f"{__name__} is online!")
@@ -114,6 +121,15 @@ class Utils(commands.Cog):
                 ]
 
                 await message.reply(random.choice(hungry_horse))
+
+            for meow in meows:
+                if meow in message.content.lower():
+                    await message.channel.send(random.choice(meows))
+                    break
+
+            if message.content.startswith(":3") and message.content.endswith("3"):
+                await message.channel.send(":3")
+
         except Exception as e:
             logger.error(e)
 
@@ -127,6 +143,7 @@ class Utils(commands.Cog):
     @commands.has_permissions(manage_messages=True)
     async def clear(self, interaction: discord.Interaction,
                     message_id: str):
+        return
         await interaction.response.defer()
 
         try:
@@ -174,6 +191,11 @@ class Utils(commands.Cog):
 
     @app_commands.command(name="uwu", description="Toggle message uwuifier")
     async def uwu(self, interaction: discord.Interaction):
+        # checks if bot has permission to manage messages and manage webhooks in the channel
+        if not interaction.channel.permissions_for(interaction.guild.me).manage_messages or not interaction.channel.permissions_for(interaction.guild.me).manage_webhooks:
+            await interaction.response.send_message("I need the **Manage Messages** and **Manage Webhooks** permissions to use this feature.", ephemeral=True)
+            return
+        
         if interaction.user.id not in self.uwuified:
             self.uwuified.append(interaction.user.id)
             await interaction.response.send_message("Turned uwuify on")
@@ -251,6 +273,47 @@ class Utils(commands.Cog):
 
         await interaction.channel.send(content, file=file)
         await interaction.response.send_message("Message sent!", ephemeral=True)
+
+
+    @app_commands.checks.has_permissions(manage_roles=True)
+    @app_commands.command(name="verify", description="[Exclusive Command] Verify user to give access to the server")
+    async def verify(self, interaction: discord.Interaction, member: discord.Member):
+        if interaction.guild.id != 1183359049287340062:
+            await interaction.response.send_message("Command access denied", ephemeral=True)
+            return
+
+        unverified_role = discord.utils.get(interaction.guild.roles, name="Vetting pending")
+
+        if unverified_role not in member.roles:
+            await interaction.response.send_message("User already verified!", ephemeral=True)
+            return
+
+        await interaction.user.remove_roles(unverified_role)
+        await interaction.response.send_message("User has been verified and given access to the server!")
+
+
+    @commands.Cog.listener()
+    async def on_member_join(self, member: discord.Member):
+        if member.guild.id == 1183359049287340062:     
+            vetting_role = discord.utils.get(member.guild.roles, name="Vetting pending")
+            await member.add_roles(vetting_role)
+
+
+    @app_commands.command(name="pet", description="Pet someone")
+    async def pet_command(self, interaction: discord.Interaction, user: discord.User):
+        # retrieve user avater bytes
+        async with aiohttp.ClientSession() as session:
+            async with session.get(user.display_avatar.url) as response:
+                if response.status != 200:
+                    await interaction.response.send_message("Failed to retrieve user avatar.", ephemeral=True)
+                    return
+                avatar_bytes = await response.read()
+
+        source = BytesIO(avatar_bytes)
+        dest = BytesIO()
+        petpet.make(source, dest)
+        dest.seek(0)
+        await interaction.response.send_message(file=discord.File(dest, filename=f"pet_{interaction.id}.gif"))
 
 
 async def setup(bot):

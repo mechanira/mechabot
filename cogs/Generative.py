@@ -33,6 +33,20 @@ class Generative(commands.Cog):
                 content TEXT NOT NULL
             )
         """)
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS guild_generative_config(
+                id INTEGER PRIMARY KEY,
+                enabled BOOLEAN NOT NULL,
+                temperature REAL NOT NULL,
+                max_words INTEGER NOT NULL,
+                auto_cache BOOLEAN NOT NULL,
+                message_probability REAL NOT NULL
+            )
+        """)
+        self.cursor.execute("""
+            ALTER TABLE guild_generative_config
+            ADD COLUMN IF NOT EXISTS message_probability REAL NOT NULL
+        """)
         self.conn.commit()
 
     @commands.Cog.listener()
@@ -43,14 +57,28 @@ class Generative(commands.Cog):
     async def on_message(self, message: discord.Message):
         if message.author == self.bot.user:
             return
+        
+        gen_config = self.cursor.execute(
+                "SELECT * FROM guild_generative_config WHERE id = ?", (message.guild.id,)
+            ).fetchone()
+        id, enabled, temperature, max_words, auto_cache = gen_config if gen_config else (message.guild.id, False, 1.5, 100, False)
 
-        if self.bot.user in message.mentions or random.random() < 0.002:    
-            generated_message = self.generate_message(message.channel.id, 100)
+        if not enabled:
+            return
+        
+        if auto_cache:
+            self.cursor.execute(
+                "INSERT OR IGNORE INTO generator_message_cache (id, channel_id, content) VALUES (?, ?, ?)", (message.id, message.channel.id, message.content,)
+            )
+            self.conn.commit()
+
+        if self.bot.user in message.mentions or random.random() < 0.002:
+            generated_message = self.generate_message(message.channel.id, max_words, temperature)
             await message.channel.send(generated_message, allowed_mentions=discord.AllowedMentions.none())
             logger.debug("Generated message sent")
 
 
-    def generate_message(self, channel_id, max_words, temperature=1.5):
+    def generate_message(self, channel_id, max_words, temperature):
         messages = []
 
         self.cursor.execute(
@@ -132,9 +160,13 @@ class Generative(commands.Cog):
         logger.info(f"Cached messages for channel {channel.id}")
 
 
-    @commands.has_permissions(manage_messages=True)
+    @app_commands.checks.has_permissions(manage_messages=True)
     @app_commands.command(name="delete_cache", description="Deletes the message generation cache for this channel")
     async def delete_cache_command(self, interaction: discord.Interaction, channel: discord.TextChannel = None):
+        if interaction.user.guild_permissions.manage_messages == False:
+            await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+            return
+
         if channel == None:
             channel = interaction.channel
 
@@ -146,6 +178,71 @@ class Generative(commands.Cog):
 
         logger.info(f"Deleted message generation cache for channel: {channel.id}")
         await interaction.response.send_message("Deleted message generation cache", ephemeral=True)
+
+
+    @app_commands.checks.has_permissions(manage_guild=True)
+    @app_commands.command(name="gen_config", description="Configure the generative message settings")
+    @app_commands.choices(option=[
+        app_commands.Choice(name="enabled", value="enabled"),
+        app_commands.Choice(name="temperature", value="temperature"),
+        app_commands.Choice(name="max_words", value="max_words"),
+        app_commands.Choice(name="auto_cache", value="auto_cache")
+    ])
+    async def gen_config_command(self, interaction: discord.Interaction, option: str = None, value: str = None):
+        if interaction.user.guild_permissions.manage_guild == False:
+            await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+            return
+
+        if option == None or value == None:
+            self.cursor.execute(
+                "SELECT * FROM guild_generative_config WHERE id = ?", (interaction.guild.id,)
+            )
+            row = self.cursor.fetchone()
+            if row is None:
+                self.cursor.execute(
+                    "INSERT INTO guild_generative_config (id, enabled, temperature, max_words, auto_cache) VALUES (?, ?, ?, ?, ?)",
+                    (interaction.guild.id, False, 1.5, 100, False)
+                )
+                row = (interaction.guild.id, False, 1.5, 100, False)
+                self.conn.commit()
+
+            guild_id, enabled, temperature, max_words, auto_cache = row
+
+            embed = discord.Embed(
+                title="Message Gen Config",
+                description=f"`enabled` - {self.bool_emoji(enabled)}\n`temperature` - `{temperature}`\n`max_words` - `{max_words}`\n`auto_cache` - {self.bool_emoji(auto_cache)}"
+            )
+
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+        
+        if option == "enabled":
+            value = value.lower() in ["true", "on"]
+        elif option == "auto_cache":
+            value = value.lower() in ["true", "on"]
+        elif option == "temperature":
+            try:
+                value = float(value)
+            except ValueError:
+                await interaction.response.send_message("Value must be a number.", ephemeral=True)
+                return
+        elif option == "max_words":
+            try:
+                value = int(value)
+            except ValueError:
+                await interaction.response.send_message("Value must be an integer.", ephemeral=True)
+                return
+        else:
+            await interaction.response.send_message("Invalid option.", ephemeral=True)
+            return
+        
+        self.cursor.execute(
+            f"UPDATE guild_generative_config SET {option} = ? WHERE id = ?",
+            (value, interaction.guild.id)
+        )
+        self.conn.commit()
+        
+        await interaction.response.send_message(f"Set `{option}` to `{value}`", ephemeral=True)
 
 
     def build_trigram_counts(self, messages):
@@ -195,6 +292,9 @@ class Generative(commands.Cog):
         # Normalize
         total = sum(adjusted.values())
         return {w: p / total for w, p in adjusted.items()}
+    
+    def bool_emoji(self, value: bool) -> str:
+        return "✅" if value else "❌"
 
 async def setup(bot):
     await bot.add_cog(Generative(bot))

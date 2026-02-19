@@ -17,7 +17,7 @@ bot = commands.Bot(command_prefix="m.",
 
 os.makedirs("logs", exist_ok=True)
 
-logger = logging.getLogger("discord")
+logger = logging.getLogger("main")
 logger.setLevel(logging.INFO)
 
 handler = TimedRotatingFileHandler(filename='logs/bot.log', encoding='utf-8', when='midnight', interval=1, backupCount=7)

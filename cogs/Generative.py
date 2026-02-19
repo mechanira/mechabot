@@ -43,10 +43,6 @@ class Generative(commands.Cog):
                 message_probability REAL NOT NULL
             )
         """)
-        self.cursor.execute("""
-            ALTER TABLE guild_generative_config
-            ADD COLUMN IF NOT EXISTS message_probability REAL NOT NULL
-        """)
         self.conn.commit()
 
     @commands.Cog.listener()
@@ -200,27 +196,25 @@ class Generative(commands.Cog):
             row = self.cursor.fetchone()
             if row is None:
                 self.cursor.execute(
-                    "INSERT INTO guild_generative_config (id, enabled, temperature, max_words, auto_cache) VALUES (?, ?, ?, ?, ?)",
-                    (interaction.guild.id, False, 1.5, 100, False)
+                    "INSERT INTO guild_generative_config (id, enabled, temperature, max_words, auto_cache, message_probability) VALUES (?, ?, ?, ?, ?, ?)",
+                    (interaction.guild.id, False, 1.5, 100, False, 0.002)
                 )
-                row = (interaction.guild.id, False, 1.5, 100, False)
+                row = (interaction.guild.id, False, 1.5, 100, False, 0.002)
                 self.conn.commit()
 
-            guild_id, enabled, temperature, max_words, auto_cache = row
+            guild_id, enabled, temperature, max_words, auto_cache, message_probability = row
 
             embed = discord.Embed(
                 title="Message Gen Config",
-                description=f"`enabled` - {self.bool_emoji(enabled)}\n`temperature` - `{temperature}`\n`max_words` - `{max_words}`\n`auto_cache` - {self.bool_emoji(auto_cache)}"
+                description=f"`enabled` - {self.bool_emoji(enabled)}\n`temperature` - `{temperature}`\n`max_words` - `{max_words}`\n`auto_cache` - {self.bool_emoji(auto_cache)}\n`message_probability` - `{message_probability}`",
             )
 
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
         
-        if option == "enabled":
-            value = value.lower() in ["true", "on"]
-        elif option == "auto_cache":
-            value = value.lower() in ["true", "on"]
-        elif option == "temperature":
+        if option in ("enabled", "auto_cache"):
+            value = value.lower() in ("true", "on")
+        elif option in ("temperature", "message_probability"):
             try:
                 value = float(value)
             except ValueError:

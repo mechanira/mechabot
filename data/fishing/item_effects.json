@@ -1,0 +1,11 @@
+{
+    "apprentice_bait": {
+        "fishing_power": 10
+    },
+    "journeyman_bait": {
+        "fishing_power": 25
+    },
+    "master_bait": {
+        "fishing_power": 50
+    }
+}

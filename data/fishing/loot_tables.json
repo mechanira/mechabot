@@ -1,0 +1,40 @@
+{
+    "wooden_crate": {
+        "journeyman_bait": {
+            "weight": 10,
+            "min_amount": 1,
+            "max_amount": 5
+        }
+    },
+    "iron_crate": {
+        "apprentice_bait": {
+            "weight": 5,
+            "min_amount": 1,
+            "max_amount": 3
+        }
+    },
+    "golden_crate": {
+        "master_bait": {
+            "weight": 2,
+            "min_amount": 1,
+            "max_amount": 1
+        }
+    },
+    "bait_box": {
+        "journeyman_bait": {
+            "weight": 20,
+            "min_amount": 1,
+            "max_amount": 3
+        },
+        "apprentice_bait": {
+            "weight": 5,
+            "min_amount": 1,
+            "max_amount": 5
+        },
+        "master_bait": {
+            "weight": 1,
+            "min_amount": 1,
+            "max_amount": 1
+        }
+    }
+}

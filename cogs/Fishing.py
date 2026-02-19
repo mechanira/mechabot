@@ -11,6 +11,8 @@ import datetime
 import asyncio
 import logging
 from logging.handlers import TimedRotatingFileHandler
+from dataclasses import dataclass
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -23,17 +25,12 @@ console_handler = logging.StreamHandler()
 console_handler.setFormatter(logging.Formatter('[%(asctime)s] [%(levelname)s/%(name)s]: %(message)s'))
 logger.addHandler(console_handler)
 
-xp_emojis = {
-    "left_empty": "<:xp_right_empty:1351216992056639530>",
-    "left_half": "<:xp_left_half:1351217325336039474>",
-    "left_full": "<:xp_left_full:1351217303076995236>",
-    "middle_empty": "<:xp_middle_empty:1351217360320594032>",
-    "middle_half": "<:xp_middle_half:1351217426590601236>",
-    "middle_full": "<:xp_middle_full:1351217406617587723>",
-    "right_empty": "<:xp_right_empty:1351217444651405322>",
-    "right_half": "<:xp_right_half:1351217474091225118>",
-    "right_full": "<:xp_right_full:1351217458265980948>",
-}
+with open("data/fishing/items.json", "r") as f:
+    ITEM_REGISTRY = json.load(f)
+    logger.debug(f"Loaded item registry with {len(ITEM_REGISTRY)} items")
+
+emojis = None
+logger.debug(f"Loaded emoji mappings!")
 
 biome_level_requirements = {
     "river": 0,
@@ -53,69 +50,49 @@ rarity_colors = [
     discord.Color.blue(),
     discord.Color.purple(),
     discord.Color.yellow(),
-    discord.Color.fuchsia()
+    discord.Color.orange()
 ]
+
+async def item_autocomplete(interaction: discord.Interaction, current: str):
+    current = current.lower()
+    matched_items = [item for item in ITEM_REGISTRY if current in item['name'].lower() and item['type'] in ['rod', 'bait', 'accessory']]
+    return [app_commands.Choice(name=item['name'], value=item['name']) for item in matched_items[:25]]
 
 class Fishing(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+
         self.conn = sqlite3.connect('data.db')
+        self.conn.row_factory = sqlite3.Row
         self.cursor = self.conn.cursor()
         self.cursor.execute("""
-            CREATE TABLE IF NOT EXISTS infi_user(
+            CREATE TABLE IF NOT EXISTS fish_user(
                 id INTEGER PRIMARY KEY,
-                level INTEGER,
-                xp INTEGER,
-                max_xp INTEGER,
-                balance INTEGER DEFAULT 0,
-                current_biome TEXT
+                level INTEGER DEFAULT 1,
+                xp INTEGER DEFAULT 0,
+                max_xp INTEGER DEFAULT 100,
+                money INTEGER DEFAULT 0,
+                current_biome TEXT DEFAULT 'river'
             )
         """)
         self.cursor.execute("""
-            CREATE TABLE IF NOT EXISTS infi_fish(
+            CREATE TABLE IF NOT EXISTS fish_inventory(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                item_id INTEGER,
                 user_id INTEGER,
-                name TEXT,
-                lore TEXT,
-                rarity INTEGER,
-                size INTEGER,
-                value INTEGER,
-                biome TEXT,
-                sold BOOLEAN DEFAULT 0,
-                FOREIGN KEY(user_id) REFERENCES infi_user(id)
+                quantity INTEGERL,
+                UNIQUE(item_id, user_id)
+            )
+        """)
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS fish_equipment(
+                user_id INTEGER NOT NULL,
+                slot TEXT NOT NULL,
+                item_id INTEGER,
+                PRIMARY KEY (user_id, slot)
             )
         """)
         self.conn.commit()
-        
-        genai.configure(api_key=os.environ["GEMINI_KEY"])
-
-        self.model = genai.GenerativeModel(
-            model_name='models/gemini-2.5-flash-lite',
-            system_instruction=(
-                "You are a fish data generation model that works for a Discord bot."
-                """
-                Your prompts will come as payload data in the form of a JSON string such as:
-                {
-                    "biome": "river",
-                    "rarity": 1
-                }
-                """
-                "The biome tag specifies which biome the fish is being catched from"
-                "The rarity tag specifies the rarity of fish (1-6). Lower rarity fish are typically small and more realistic, and higher rarity fish are typically more mythical or fantasy and they can even be very massive"
-                """
-                Your responses should ONLY contain a raw string (without the ```json formatting) of the specified JSON template which you can fill out. The template will be for the fish that you catch:
-                {
-                    "name": "insert fish name (species)",
-                    "lore": "insert fish description (make sure to not reuse the fish name here)",
-                    "size": insert an exact size in centimeters eg. (120), must be an integer
-                    "value": insert value of the catch in dollars, must be an integer
-                    "xp": insert xp gain from the catch, must be an integer
-                }
-
-                If you catch a fish with a rarity of 0, that means you got a junk item. Junk is totally worthless, and can be generated uniquely in each biome.
-                """
-            )
-        )
 
 
     @commands.Cog.listener()
@@ -129,102 +106,141 @@ class Fishing(commands.Cog):
     @app_commands.checks.cooldown(1, 5.0, key=lambda i: (i.user.id))
     @app_commands.command(name="fish", description="Catch a fish!")
     async def fish(self, interaction: discord.Interaction):
-        try:
-            user_id = interaction.user.id
+        user_id = interaction.user.id
 
-            self.cursor.execute("SELECT level, xp, max_xp, current_biome FROM infi_user WHERE id = ?", (user_id,))
-            user_data = self.cursor.fetchone()
+        self.cursor.execute("SELECT level, xp, max_xp, current_biome FROM fish_user WHERE id = ?", (user_id,))
+        user_data = self.cursor.fetchone()
+        
+        if user_data is not None:
+            level, xp, max_xp, current_biome = user_data
+        else:
+            level = 1
+            xp = 0
+            max_xp = 100
+            current_biome = 'river'
             
-            if user_data is not None:
-                level, xp, max_xp, current_biome = user_data
-            else:
-                level = 1
-                xp = 0
-                max_xp = 100
-                current_biome = 'river'
-                
-            weights = [1, 4, 20, 65, 195, 360, 50]
-            rarity_levels = [6, 5, 4, 3, 2, 1, 0]
-            
+        weights = [1, 4, 20, 65, 195, 360]
+        rarity_levels = [6, 5, 4, 3, 2, 1]
+        highest_rarity = 0
+        
+        rolls = 1
+        catches = []
+
+        for _ in range(rolls):
             rarity = random.choices(rarity_levels, weights)[0]
+            highest_rarity = max(highest_rarity, rarity)
 
-            payload = {
-                "biome": current_biome,
-                "rarity": rarity
-            }
-            logger.debug(f"Sending payload: {payload}")
+            fish_items = [item for item in ITEM_REGISTRY if item['rarity'] == rarity and current_biome in item['biome']]
+            if not fish_items:
+                logger.warning(f"No fish found for rarity {rarity} in biome {current_biome}")
+                continue
+            catch = random.choice(fish_items)
+            catches.append(dict(catch))
+        
+        xp_gain = int(sum(catch['value'] for catch in catches) / 2)
+        xp += xp_gain
+        old_level = level
 
-            response = await asyncio.to_thread(self.model.generate_content, str(payload))
-            response_json = response.text
-            logger.debug(f"Retrieved fishing data: {response_json}")
+        level_label = f"Level {level}"
 
-            if response_json.startswith("```"):
-                response_json = response_json.strip("```json").strip("```").strip()
+        while(xp >= max_xp):
+            xp -= max_xp
+            max_xp = self.xp_required(level=level)
+            level += 1
+            level_label = f"**LEVEL UP! {old_level} >> {level}**"
 
-            response_dict = json.loads(response_json)
+        self.cursor.execute("""
+            INSERT INTO fish_user (id, level, xp, max_xp, current_biome) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET level = ?, xp = ?, max_xp = ?, current_biome = ?
+        """, (user_id, level, xp, max_xp, current_biome, level, xp, max_xp, current_biome))
 
-            fish_name, lore, size, value, xp_gain = (
-                response_dict.get(k, default) for k, default in 
-                [("name", "Unknown"), ("lore", "No lore available"), ("size", "Unknown"), ("value", 0), ("xp", 0)]
-            )
+        stacks = {}
+        for catch in catches:
+            self.cursor.execute("""
+                INSERT INTO fish_inventory (item_id, user_id, quantity)
+                VALUES (?, ?, ?)
+                ON CONFLICT(item_id, user_id)
+                DO UPDATE SET quantity = quantity + excluded.quantity
+                """, (catch["id"], user_id, 1))
 
-            XP_MULTIPLIER = 1.0
-            xp_gain = int(value * (random.random() + 0.5) * XP_MULTIPLIER)
+            catch_name = f"{catch['name']} {':star:' * catch['rarity']}"
+            stacks[catch_name] = stacks.get(catch_name, 0) + 1
 
-            self.cursor.execute(
-                "INSERT INTO infi_fish (user_id, name, lore, rarity, size, value, biome) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (interaction.user.id, fish_name, lore, rarity, size, value, current_biome)
-            )
-            fish_id = self.cursor.lastrowid
+        catch_descriptions = [f"`x{quantity}` **{name}**" for name, quantity in stacks.items()]
+        description = "\n".join(catch_descriptions)
 
-            xp += xp_gain
-            old_level = level
+        embed = discord.Embed(
+            title=f"Caught fish",
+            description=f"""
+                            {description}
+                            {level_label}
+                            {self.xp_bar(xp, max_xp)} {xp:,}/{max_xp:,} {f'`+{xp_gain}`' if xp_gain > 0 else ''}
+                        """,
+            color=rarity_colors[highest_rarity]
+        )
+        embed.set_footer(text=f"Biome: {current_biome.capitalize()}")
+        
+        self.conn.commit()
 
-            level_label = f"Level {level}"
+        await interaction.response.send_message(embed=embed)
 
-            while(xp >= max_xp):
-                xp -= max_xp
-                max_xp = self.xp_required(level=level)
-                level += 1
-                level_label = f"**LEVEL UP! {old_level} >> {level}**"
-
-            embed = discord.Embed(
-                title=f"{fish_name} {':star:' * rarity}",
-                description=f"""
-                *{lore}*
-
-                **Size:** {size} cm
-                **Value:** ${value:,}
-
-                {level_label}
-                {self.xp_bar(xp, max_xp)} {xp:,}/{max_xp:,} {f'`+{xp_gain}`' if rarity > 0 else ''}
-                """,
-                color=rarity_colors[rarity]
-            )
-            embed.set_footer(text=f"Biome: {current_biome} {f'• ID: {fish_id}' if rarity > 0 else ''}")
-
-            if rarity > 0:
-                self.cursor.execute("""
-                    INSERT INTO infi_user (id, level, xp, max_xp, current_biome) 
-                    VALUES (?, ?, ?, ?, ?)
-                    ON CONFLICT(id) DO UPDATE SET 
-                        level = excluded.level,
-                        xp = excluded.xp,
-                        max_xp = excluded.max_xp,
-                        current_biome = excluded.current_biome;
-                """, (user_id, level, xp, max_xp, current_biome))
-            
-            self.conn.commit()
-
-            await interaction.response.send_message(embed=embed)
-        except Exception as e:
-            logger.error(f"An error occured: {e}")
-            await interaction.response.send_message(f"An error occurred", ephemeral=True)
 
     @fish.error
     async def fish_error(self, interaction: discord.Interaction, error):
         if isinstance(error, app_commands.CommandOnCooldown):
-            await interaction.response.send_message(f"You are on cooldown! Try again in {round(error.retry_after, 2)} seconds.", ephemeral=True)
+            await interaction.response.send_message(f"You are on cooldown! Try again <t:{int(error.retry_after + datetime.now().timestamp())}:R>", ephemeral=True)
+    
+
+    @app_commands.command(name="inventory", description="Check your fish inventory")
+    async def inventory_command(self, interaction: discord.Interaction, item_name: str = None):
+        if item_name:
+            item_name_internalized = item_name.lower().replace(" ", "_")
+            matched_item = next((item for item in ITEM_REGISTRY if item['internal_name'] == item_name_internalized), None)
+            if not matched_item:
+                await interaction.response.send_message("No such item exists. Try again!", ephemeral=True)
+                return
+            item_id = matched_item['id']
+
+            self.cursor.execute("""
+                SELECT item_id, quantity FROM fish_inventory WHERE user_id = ? AND item_id = ?
+            """, (interaction.user.id, item_id,))
+            item_stack = self.cursor.fetchone()
+
+            if not item_stack:
+                await interaction.response.send_message("No such items found in your inventory!", ephemeral=True)
+                return
+            
+            embed = discord.Embed(
+                title="Inventory",
+                description=f"""
+                `x{item_stack[1]:,}` **{matched_item['name']}** {':star:' * matched_item['rarity']}
+                *"{matched_item['lore']}"*
+                """
+            )
+            await interaction.response.send_message(embed=embed)
+            return
+
+        self.cursor.execute("""
+            SELECT item_id, quantity FROM fish_inventory WHERE user_id = ?
+        """, (interaction.user.id,))
+        inventory_data = self.cursor.fetchall()
+
+        if not inventory_data:
+            await interaction.response.send_message("Your inventory is empty!", ephemeral=True)
+            return
+
+        description = ""
+        for item_id, quantity in inventory_data[:10]:
+            item_info = next((item for item in ITEM_REGISTRY if item['id'] == item_id), None)
+            if item_info:
+                description += f"`x{quantity}` **{item_info['name']}**\n"
+
+        embed = discord.Embed(
+            title=f"{interaction.user.display_name}'s Inventory",
+            description=description
+        )
+
+        await interaction.response.send_message(embed=embed)
 
 
     @app_commands.command(name="biomes", description="Change the fishing biome")
@@ -238,7 +254,7 @@ class Fishing(commands.Cog):
         app_commands.Choice(name="Sky", value="sky"),
         app_commands.Choice(name="Space", value="space")
         ])
-    async def biomes(self, interaction: discord.Interaction, biome: app_commands.Choice[str] = None):
+    async def biomes_command(self, interaction: discord.Interaction, biome: app_commands.Choice[str] = None):
         if biome == None:
             description = ""
             for k, v in biome_level_requirements.items():
@@ -252,7 +268,7 @@ class Fishing(commands.Cog):
             await interaction.response.send_message(embed=embed)
             return
 
-        user_data = self.cursor.execute("SELECT level FROM infi_user WHERE id = ?", (interaction.user.id,))
+        user_data = self.cursor.execute("SELECT level FROM fish_user WHERE id = ?", (interaction.user.id,))
         level = user_data.fetchone()[0]
 
         if level < biome_level_requirements[biome.value]:
@@ -267,7 +283,23 @@ class Fishing(commands.Cog):
 
         await interaction.response.send_message(f"Biome successfully changed to **{biome.name}**!")
 
+    
+    @app_commands.command(name="equip", description="Equip a fishing item to gain its bonuses. Run the same command again to unequip.")
+    @app_commands.autocomplete(item_name=item_autocomplete)
+    async def equip_command(self, interaction: discord.Interaction, item_name: str):
+        matched_item = self.get_item(item_name)
+        if not matched_item:
+            await interaction.response.send_message("No such item exists. Try again!", ephemeral=True)
+            return
 
+
+    def get_item(self, item_name: str):
+        item_name_internalized = item_name.lower().replace(" ", "_")
+        matched_item = next((item for item in ITEM_REGISTRY if item['internal_name'] == item_name_internalized), None)
+        return matched_item
+
+
+    """
     @app_commands.command(name="sell", description="Sell all your fish")
     async def sell(self, interaction: discord.Interaction):
         self.cursor.execute("BEGIN TRANSACTION;")
@@ -288,18 +320,18 @@ class Fishing(commands.Cog):
         self.conn.commit()
 
         await interaction.response.send_message(f"Sold {len(unsold_fish)} fish for ${total_value:,}")
+    """
 
     
     @app_commands.command(name="profile", description="Check your fishing profile")
     async def profile(self, interaction: discord.Interaction):
-        self.cursor.execute("SELECT level, xp, max_xp, balance, current_biome FROM infi_user WHERE id = ?", (interaction.user.id,))
+        self.cursor.execute("SELECT level, xp, max_xp, balance, current_biome FROM fish_user WHERE id = ?", (interaction.user.id,))
         user_data = self.cursor.fetchone()
 
-        if user_data is not None:
-            level, xp, max_xp, balance, current_biome = user_data
-        else:
-            await interaction.response.send_message("You don't have a fishing profile created. Do `/fish` to create one")
-            return
+        if user_data is None:
+            user_data = (1, 0, 100, 0, 'river')
+
+        level, xp, max_xp, balance, current_biome = user_data
         
         self.cursor.execute("SELECT * FROM infi_fish WHERE user_id = ?", (interaction.user.id,))
         user_fish = self.cursor.fetchall()
@@ -405,6 +437,9 @@ class Fishing(commands.Cog):
 
 
     def xp_bar(self, xp, max_xp, length=10) -> str:
+        if emojis is None:
+            return ""
+
         progress = max(0, min(1, xp / max_xp))
         filled_bars = int(progress * length)
         remaining = (progress * length) - filled_bars
@@ -414,25 +449,25 @@ class Fishing(commands.Cog):
         for i in range(length):
             if i < filled_bars:
                 if i == 0:
-                    bar_string += xp_emojis["left_full"]
+                    bar_string += emojis["xp_left_full"]
                 elif i == length - 1:
-                    bar_string += xp_emojis["right_full"]
+                    bar_string += emojis["xp_right_full"]
                 else:
-                    bar_string += xp_emojis["middle_full"]
+                    bar_string += emojis["xp_middle_full"]
             elif i == filled_bars and remaining >= 0.5:
                 if i == 0:
-                    bar_string += xp_emojis["left_half"]
+                    bar_string += emojis["xp_left_half"]
                 elif i == length - 1:
-                    bar_string += xp_emojis["right_half"]
+                    bar_string += emojis["xp_right_half"]
                 else:
-                    bar_string += xp_emojis["middle_half"]
+                    bar_string += emojis["xp_middle_half"]
             else:
                 if i == 0:
-                    bar_string += xp_emojis["left_empty"]
+                    bar_string += emojis["xp_left_empty"]
                 elif i == length - 1:
-                    bar_string += xp_emojis["right_empty"]
+                    bar_string += emojis["xp_right_empty"]
                 else:
-                    bar_string += xp_emojis["middle_empty"]
+                    bar_string += emojis["xp_middle_empty"]
 
         return bar_string
 

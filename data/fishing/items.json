@@ -1,0 +1,145 @@
+[
+    {
+        "id": 1,
+        "internal_name": "common_carp",
+        "name": "Common Carp",
+        "lore": "A common fish found in rivers.",
+        "type": "fish",
+        "size": 30,
+        "value": 2,
+        "rarity": 1,
+        "biome": "river"
+    },
+    {
+        "id": 2,
+        "internal_name": "salmon",
+        "name": "Salmon",
+        "lore": "A popular fish known for its pink flesh.",
+        "type": "fish",
+        "size": 40,
+        "value": 5,
+        "rarity": 2,
+        "biome": "river"
+    },
+    {
+        "id": 3,
+        "internal_name": "tuna",
+        "name": "Tuna",
+        "lore": "A large fish that is prized for its meat.",
+        "type": "fish",
+        "size": 50,
+        "value": 10,
+        "rarity": 3,
+        "biome": "ocean"
+    },
+    {
+        "id": 4,
+        "internal_name": "golden_trout",
+        "name": "Golden Trout",
+        "lore": "A rare and beautiful fish with golden scales.",
+        "type": "fish",
+        "size": 35,
+        "value": 20,
+        "rarity": 4,
+        "biome": "river"
+    },
+    {
+        "id": 5,
+        "internal_name": "giant_catfish",
+        "name": "Giant Catfish",
+        "lore": "A massive fish that can grow up to several feet long.",
+        "type": "fish",
+        "size": 60,
+        "value": 50,
+        "rarity": 5,
+        "biome": "river"
+    },
+    {
+        "id": 6,
+        "internal_name": "wooden_crate",
+        "name": "Wooden Crate",
+        "lore": "A crate that may contain various items.",
+        "type": "crate",
+        "size": 0,
+        "value": 0,
+        "rarity": 3,
+        "biome": "river"
+    },
+    {
+        "id": 7,
+        "internal_name": "iron_crate",
+        "name": "Iron Crate",
+        "lore": "A sturdy crate that may contain valuable items.",
+        "type": "crate",
+        "size": 0,
+        "value": 0,
+        "rarity": 4,
+        "biome": "river"
+    },
+    {
+        "id": 8,
+        "internal_name": "golden_crate",
+        "name": "Golden Crate",
+        "lore": "A shiny crate that may contain rare items.",
+        "type": "crate",
+        "size": 0,
+        "value": 0,
+        "rarity": 5,
+        "biome": "river"
+    },
+    {
+        "id": 9,
+        "internal_name": "journeyman_bait",
+        "name": "Journeyman Bait",
+        "lore": "Increases fishing power by 10.",
+        "type": "bait",
+        "size": 0,
+        "value": 0,
+        "rarity": 2,
+        "biome": null
+    },
+    {
+        "id": 10,
+        "internal_name": "apprentice_bait",
+        "name": "Apprentice Bait",
+        "lore": "Increases fishing power by 25.",
+        "type": "bait",
+        "size": 0,
+        "value": 0,
+        "rarity": 1,
+        "biome": null
+    },
+    {
+        "id": 11,
+        "internal_name": "master_bait",
+        "name": "Master Bait",
+        "lore": "Increases fishing power by 50.",
+        "type": "bait",
+        "size": 0,
+        "value": 0,
+        "rarity": 3,
+        "biome": null
+    },
+    {
+        "id": 12,
+        "internal_name": "lucky_horseshoe",
+        "name": "Lucky Horseshoe",
+        "lore": "Increases luck by 10%.",
+        "type": "accessory",
+        "size": 0,
+        "value": 0,
+        "rarity": 3,
+        "biome": null
+    },
+    {
+        "id": 13,
+        "internal_name": "fishing_bobber",
+        "name": "Fishing Bobber",
+        "lore": "Increases fishing power by 10.",
+        "type": "accessory",
+        "size": 0,
+        "value": 0,
+        "rarity": 2,
+        "biome": null
+    }
+]

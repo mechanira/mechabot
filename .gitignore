@@ -8,7 +8,6 @@ __pycache__/
 
 /assets
 *.db
-*.json
 *.wav
 *.ogg
 node_modules/

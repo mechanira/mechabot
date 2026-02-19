@@ -189,6 +189,7 @@ class Utils(commands.Cog):
         await interaction.response.send_message(f"{user.display_name} is **{random.randint(0, 100)}% {meter}**")
 
 
+    @app_commands.checks.bot_has_permissions(manage_messages=True, manage_webhooks=True)
     @app_commands.command(name="uwu", description="Toggle message uwuifier")
     async def uwu(self, interaction: discord.Interaction):
         # checks if bot has permission to manage messages and manage webhooks in the channel
@@ -202,6 +203,11 @@ class Utils(commands.Cog):
         else:
             self.uwuified.remove(interaction.user.id)
             await interaction.response.send_message("Turned uwuifier off")
+    
+    @uwu.error
+    async def uwu_error(self, interaction: discord.Interaction, error):
+        if isinstance(error, app_commands.errors.BotMissingPermissions):
+            await interaction.response.send_message("I need the **Manage Messages** and **Manage Webhooks** permissions to use this feature.", ephemeral=True)
 
 
     @app_commands.command(name="average_color", description="Gets the average color of an image")

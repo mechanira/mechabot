@@ -7,10 +7,11 @@ from datetime import datetime, timezone
 
 
 class Reminder(commands.Cog):
-    def __init__(self, bot, db, logger):
+    def __init__(self, bot, db, logger, languages):
         self.bot = bot
         self.db = db
-        self.self.logger = logger
+        self.logger = logger
+        self.languages = languages
         self.check_reminders.start()
         self.check_daily_reminders.start()
 
@@ -59,7 +60,7 @@ class Reminder(commands.Cog):
             remind_at = Reminder._parse_time(time_input)
             if remind_at is None or remind_at < int(time.time()):
                 await interaction.response.send_message(
-                    "Invalid time format! Use formats like `10s`, `5m`, `2d1h30m`, `3M`, or a Unix timestamp.",
+                    self.languages.getText(0),
                     ephemeral=True
                 )
                 return
@@ -72,13 +73,13 @@ class Reminder(commands.Cog):
             human_time = datetime.fromtimestamp(remind_at, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
 
             embed = discord.Embed(
-                title="Reminder set!",
-                description=f'**"{label}"**\n\nAt `{human_time} (<t:{remind_at}:R>)`',
+                title=self.languages.getText(2),
+                description=self.languages.getText(3, label, human_time, remind_at),
                 color=discord.Color.blurple())
             
             await interaction.response.send_message(
-                f"Reminder set for <@{user.id}>: `{label}` <t:{remind_at}:R>\n"
-                f"**Will be sent to:** {'DM' if send_dm else 'here' if channel_id == interaction.channel_id else f'<#{channel_id}>'}"
+                self.languages.getText(4, user.id, label, remind_at) +
+                self.languages.getText(5, 'DM' if send_dm else 'here' if channel_id == interaction.channel_id else f'<#{channel_id}>')
             )
         except Exception as e:
             self.logger.error(f"An error occured: {e}")
@@ -96,7 +97,7 @@ class Reminder(commands.Cog):
     ):
         try:
             if not time_input or len(time_input) != 5 or ":" not in time_input:
-                await interaction.response.send_message("Invalid time format! Use `HH:MM` (UTC).", ephemeral=True)
+                await interaction.response.send_message(self.languages.getText(6), ephemeral=True)
                 return
 
             user = interaction.user
@@ -106,16 +107,16 @@ class Reminder(commands.Cog):
             self.db.insertReminder(user_id, channel_id, label, None, time_input, send_dm)
 
             await interaction.response.send_message(
-                f"🔁 Daily reminder set for <@{user.id}>: `{label}` every day at `{time_input} UTC`", ephemeral=True
+                self.languages.getText(7, user.id, label, time_input), ephemeral=True
             )
 
         except sqlite3.Error as e:
             self.logger.error(f"Database error: {e}")
-            await interaction.response.send_message("There was an issue saving your reminder. Please try again later.", ephemeral=True)
+            await interaction.response.send_message(self.languages.getText(8), ephemeral=True)
 
         except Exception as e:
             self.logger.error(f"General error: {e}")
-            await interaction.response.send_message("Something went wrong. Please try again later.", ephemeral=True)
+            await interaction.response.send_message(self.languages.getText(9), ephemeral=True)
 
 
     @app_commands.command(name="reminder_daily_cancel", description="Cancel a daily reminder by label")
@@ -123,7 +124,7 @@ class Reminder(commands.Cog):
 
         self.db.deleteReminder(interaction.user.id, label)
 
-        await interaction.response.send_message(f"Daily reminder `{label}` has been canceled!", ephemeral=True)
+        await interaction.response.send_message(self.languages.getText(10, label), ephemeral=True)
 
 
     @app_commands.command(name="reminders", description="View all your active reminders")
@@ -132,19 +133,19 @@ class Reminder(commands.Cog):
         reminders = self.db.selectReminder_foruser(interaction.user.id)
 
         if not reminders:
-            await interaction.response.send_message("You have no active reminders.", ephemeral=True)
+            await interaction.response.send_message(self.languages.getText(11), ephemeral=True)
             return
 
         embed = discord.Embed(
-            title="Your Active Reminders",
+            title=self.languages.getText(12),
             color=discord.Color.blue()
         )
 
         for index, (label, daily_time, send_dm) in enumerate(reminders, start=1):
             delivery_method = "DM" if send_dm else "Channel"
             embed.add_field(
-                name=f"Reminder {index}",
-                value=f"**Label:** {label}\n**Time:** `{daily_time} UTC`\n**Delivery:** {delivery_method}",
+                name=self.languages.getText(13, index),
+                value=self.languages.getText(14, label, daily_time, delivery_method),
                 inline=False
             )
 
@@ -164,16 +165,12 @@ class Reminder(commands.Cog):
             reminder_id, user_id, channel_id, label, send_dm, daily = reminder
             user = self.bot.get_user(user_id)
 
-            message = "Reminder"
-            if daily != "" or daily != None:
-                message = "Daily reminder"
-
             if send_dm and user:
                 try:
-                    await user.send(f"{message}: **{label}** is due!")
+                    await user.send(self.languages.getText(15, label))
                 except discord.Forbidden:
                     self.logger.error(f"Could not DM {user_id}, they might have DMs disabled.")
             elif channel_id:
                 channel = self.bot.get_channel(channel_id)
                 if channel:
-                    await channel.send(f"<@{user_id}>, {message.lower()}: **{label}** is due!")
+                    await channel.send(self.languages.getText(16, user_id, label))

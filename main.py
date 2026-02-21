@@ -9,6 +9,7 @@ from logging.handlers import TimedRotatingFileHandler
 
 from cogs.Reminder import Reminder
 from utils.database.database import DBManager
+from utils.languages.languages import Languages
 
 load_dotenv()
 
@@ -32,6 +33,7 @@ console_handler.setFormatter(logging.Formatter('[%(asctime)s] [%(levelname)s/%(n
 logger.addHandler(console_handler)
 
 database = DBManager()
+languages = Languages()
 
 @bot.event
 async def on_ready():
@@ -67,7 +69,7 @@ async def load():
     for file in os.listdir('./cogs'):
         if file.endswith('.py') and not file = "Reminder.py":
             await bot.load_extension(f"cogs.{file[:-3]}")
-    bot.add_cog(Reminder(bot, database, logger))
+    bot.add_cog(Reminder(bot, database, logger, languages))
 
 async def main():
     async with bot:

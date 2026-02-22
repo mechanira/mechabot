@@ -1,0 +1,16 @@
+Invalid time format! Use formats like `10s`, `5m`, `2d1h30m`, `3M`, or a Unix timestamp.
+Reminder set!
+**"\?"**\n\nAt `\? (<t:\?:R>)`
+Reminder set for <@\?>: `\?` <t:\?:R>\n
+**Will be sent to:** \?
+Invalid time format! Use `HH:MM` (UTC).
+🔁 Daily reminder set for <@\?>: `\?` every day at `\? UTC`
+There was an issue saving your reminder. Please try again later.
+Something went wrong. Please try again later.
+Daily reminder `\?` has been canceled!
+You have no active reminders.
+Your Active Reminders
+Reminder \?
+**Label:** \?\n**Time:** `\? UTC`\n**Delivery:** \?
+Reminder: **\?** is due!
+<@\?>, reminder: **\?** is due!

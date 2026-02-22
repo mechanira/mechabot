@@ -1,0 +1,16 @@
+Format de date invalide! Utilisez des formats comme `10s`, `5m`, `2d1h30m`, `3M`, ou une timestamp Unix.
+Rappel défini!
+**"\?"**\n\nÀ `\? (<t:\?:R>)`
+Rappel défini pour <@\?>: `\?` <t:\?:R>\n
+**Sera envoyé à:** \?
+Format de date invalide! Utilisez `HH:MM` (UTC).
+🔁 Rappel journalier défini pour <@\?>: `\?` tous les jours à `\? UTC`
+Il y a eu un problème durant la sauvgarde de votre rappel. Essayez plus tard.
+Quelque chose c'est mal passé. Essayez plus tard.
+Le rappel journalier `\?` a été supprimer!
+Vous n'avez aucun rappels actifs.
+Vos rappels actifs
+Rappel \?
+**Titre:** \?\n**Date:** `\? UTC`\n**Déstination:** \?
+Le rappel: **\?** est échu!
+<@\?>, le rappel: **\?** est échu!

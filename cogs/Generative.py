@@ -9,20 +9,11 @@ import logging
 from logging.handlers import TimedRotatingFileHandler
 import math
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-
-handler = TimedRotatingFileHandler(filename='logs/bot.log', encoding='utf-8', when='midnight', interval=1, backupCount=7)
-handler.setFormatter(logging.Formatter('[%(asctime)s] [%(levelname)s/%(name)s]: %(message)s'))
-logger.addHandler(handler)
-
-console_handler = logging.StreamHandler()
-console_handler.setFormatter(logging.Formatter('[%(asctime)s] [%(levelname)s/%(name)s]: %(message)s'))
-logger.addHandler(console_handler)
 
 class Generative(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self.logger = bot.logger
 
         self.conn = sqlite3.connect('data.db')
         self.cursor = self.conn.cursor()
@@ -47,7 +38,7 @@ class Generative(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self):
-        logger.info(f"{__name__} is online!")
+        self.logger.info(f"{__name__} is online!")
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -71,7 +62,7 @@ class Generative(commands.Cog):
         if self.bot.user in message.mentions or random.random() < 0.002:
             generated_message = self.generate_message(message.channel.id, max_words, temperature)
             await message.channel.send(generated_message, allowed_mentions=discord.AllowedMentions.none())
-            logger.debug("Generated message sent")
+            self.logger.debug("Generated message sent")
 
 
     def generate_message(self, channel_id, max_words, temperature):
@@ -119,7 +110,7 @@ class Generative(commands.Cog):
 
         generated_message = " ".join(output)
 
-        logger.debug(f"Message generated: {generated_message}")
+        self.logger.debug(f"Message generated: {generated_message}")
 
         return generated_message
 
@@ -131,7 +122,7 @@ class Generative(commands.Cog):
 
 
     async def cache_channel(self, channel: discord.TextChannel = None, forced: bool = False):
-        logger.debug(f"Starting message caching for channel: {channel.id}")
+        self.logger.debug(f"Starting message caching for channel: {channel.id}")
 
         self.cursor.execute(
             "SELECT MAX(id) FROM generator_message_cache WHERE channel_id = ?",
@@ -140,7 +131,7 @@ class Generative(commands.Cog):
         result = self.cursor.fetchone()
         id = result[0]
 
-        logger.debug(f"Last cached message ID for channel {channel.id}: {id}")
+        self.logger.debug(f"Last cached message ID for channel {channel.id}: {id}")
         
 
         async for msg in channel.history(limit=None, after=None if forced else id, oldest_first=True):
@@ -153,7 +144,7 @@ class Generative(commands.Cog):
             )
             self.conn.commit()
 
-        logger.info(f"Cached messages for channel {channel.id}")
+        self.logger.info(f"Cached messages for channel {channel.id}")
 
 
     @app_commands.checks.has_permissions(manage_messages=True)
@@ -172,7 +163,7 @@ class Generative(commands.Cog):
         )
         self.conn.commit()
 
-        logger.info(f"Deleted message generation cache for channel: {channel.id}")
+        self.logger.info(f"Deleted message generation cache for channel: {channel.id}")
         await interaction.response.send_message("Deleted message generation cache", ephemeral=True)
 
 

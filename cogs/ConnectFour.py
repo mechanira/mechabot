@@ -2,23 +2,9 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 import random
-import sqlite3
 import json
-import logging
 from logging.handlers import TimedRotatingFileHandler
 import re
-import asyncio
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-
-handler = TimedRotatingFileHandler(filename='logs/bot.log', encoding='utf-8', when='midnight', interval=1, backupCount=7)
-handler.setFormatter(logging.Formatter('[%(asctime)s] [%(levelname)s/%(name)s]: %(message)s'))
-logger.addHandler(handler)
-
-console_handler = logging.StreamHandler()
-console_handler.setFormatter(logging.Formatter('[%(asctime)s] [%(levelname)s/%(name)s]: %(message)s'))
-logger.addHandler(console_handler)
 
 
 def winCheck(grid) -> int:
@@ -43,13 +29,16 @@ def winCheck(grid) -> int:
 
 
 def displayGrid(grid) -> str:
-    """Converts grid to an emoji-based string representation."""
-    emoji_map = {0: ":black_large_square:", 1: ":red_circle:", 2: ":blue_circle:"}
-    return "\n".join("".join(emoji_map[cell] for cell in row) for row in grid) + "\n:one::two::three::four::five::six::seven:"
+    emoji_map = {
+        0: ":black_large_square:",
+        1: ":red_circle:",
+        2: ":blue_circle:"
+    }
+    number_emoji_row = "\n:one::two::three::four::five::six::seven:"
+    return "\n".join("".join(emoji_map[cell] for cell in row) for row in grid) + number_emoji_row
 
 
 def drop_piece(grid, column, player):
-    """Drops a piece into a column if possible."""
     for row in reversed(grid):
         if row[column] == 0:
             row[column] = player
@@ -57,11 +46,10 @@ def drop_piece(grid, column, player):
     return False
 
 class ConnectFourUI(discord.ui.View):
-    def __init__(self):
+    def __init__(self, db):
         super().__init__(timeout=None)
 
-        self.conn = sqlite3.connect('data.db')
-        self.cursor = self.conn.cursor()
+        self.db = db
 
 
     @discord.ui.button(label="<", style=discord.ButtonStyle.primary)
@@ -69,10 +57,7 @@ class ConnectFourUI(discord.ui.View):
         message_id = interaction.message.id
         player_id = interaction.user.id
 
-        self.cursor.execute("SELECT * FROM connect_four WHERE message_id = ?", (message_id,))
-        game = self.cursor.fetchone()
-
-        game_id, player1_id, player2_id, turn, selected_column, grid, message_id, channel_id = game
+        game = self.db.select_connect_four_game(message_id)
 
         selected_column -= 1
 
@@ -80,9 +65,9 @@ class ConnectFourUI(discord.ui.View):
             await interaction.response.send_message("You are not in a game!", ephemeral=True)
             return
 
-        grid = json.loads(grid)
+        grid = json.loads(game["grid"])
 
-        if (turn == 1 and player_id != player1_id) or (turn == 2 and player_id != player2_id):
+        if (game["turn"] == 1 and player_id != game["player1_id"]) or (game["turn"] == 2 and player_id != game["player2_id"]):
             await interaction.response.send_message("It's not your turn!", ephemeral=True)
             return
 
@@ -90,10 +75,9 @@ class ConnectFourUI(discord.ui.View):
             await interaction.response.send_message("Column out of range!", ephemeral=True)
             return
         
-        self.cursor.execute("UPDATE connect_four SET selected_column = ? WHERE game_id = ?", (selected_column, game_id,))
-        self.conn.commit()
+        self.db.connectfour_update_selection(game["game_id"], selected_column)
 
-        await interaction.response.edit_message(embed=render_board(grid, player1_id, player2_id, turn, selected_column), view=self)
+        await interaction.response.edit_message(embed=render_board(grid, game["player1_id"], game["player2_id"], game["turn"], selected_column), view=self)
 
 
     @discord.ui.button(label="Place", style=discord.ButtonStyle.primary)
@@ -101,10 +85,7 @@ class ConnectFourUI(discord.ui.View):
         message_id = interaction.message.id
         player_id = interaction.user.id
 
-        self.cursor.execute("SELECT * FROM connect_four WHERE message_id = ?", (message_id,))
-        game = self.cursor.fetchone()
-
-        game_id, player1_id, player2_id, turn, selected_column, grid, message_id, channel_id = game
+        game = self.db.select_connect_four_game(message_id)
 
         if not game:
             await interaction.response.send_message("You are not in a game!", ephemeral=True)
@@ -112,40 +93,33 @@ class ConnectFourUI(discord.ui.View):
 
         grid = json.loads(grid)
 
-        if (turn == 1 and player_id != player1_id) or (turn == 2 and player_id != player2_id):
+        if (game["turn"] == 1 and player_id != game["player1_id"]) or (game["turn"] == 2 and player_id != game["player2_id"]):
             await interaction.response.send_message("It's not your turn!", ephemeral=True)
             return
 
-        if selected_column < 1 or selected_column > 7:
+        if game["selected_column"] < 1 or game["selected_column"] > 7:
             await interaction.response.send_message("Invalid column! Choose between 1 and 7.", ephemeral=True)
             return
 
-        col_idx = selected_column - 1
-        if not drop_piece(grid, col_idx, turn):
+        col_idx = game["selected_column"] - 1
+        if not drop_piece(grid, col_idx, game["turn"]):
             await interaction.response.send_message("That column is full!", ephemeral=True)
             return
 
         winner = winCheck(grid)
 
-        next_turn = 1 if turn == 2 else 2
+        next_turn = 1 if game["turn"] == 2 else 2
 
-        if winner == 0:
-            self.cursor.execute("UPDATE connect_four SET turn = ?, grid = ? WHERE game_id = ?", (next_turn, json.dumps(grid), game_id))
-        else:
-            self.cursor.execute("DELETE FROM connect_four WHERE game_id = ?", (game_id,))
-        self.conn.commit()
+        self.db.connectfour_check_game_state(winner, next_turn, grid, game)
 
         if winner:
             await self.disable_all(interaction) # disables the ui
 
-            player_a = get_or_create_player(self.cursor, player1_id)
-            player_b = get_or_create_player(self.cursor, player2_id)
+            player_a = self.db.connectfour_fetch_user(game["player1_id"])
+            player_b = self.db.connectfour_fetch_user(game["player2_id"])
 
-            id_a, rating_a, games_played_a, wins_a, losses_a = player_a
-            id_b, rating_b, games_played_b, wins_b, losses_b = player_b
-
-            k_a = k_factor(games_played_a)
-            k_b = k_factor(games_played_b)
+            k_a = k_factor(player_a["games_played"])
+            k_b = k_factor(player_b["games_played"])
 
             if winner == 1:
                 result_a = 1
@@ -155,7 +129,7 @@ class ConnectFourUI(discord.ui.View):
                 result_a = 0.5
 
             new_rating_a, new_rating_b = update_ratings(
-                rating_a, rating_b, result_a, k_a, k_b
+                player_a["rating"], player_b["rating"], result_a, k_a, k_b
             )
 
             new_rating_a = round(new_rating_a)
@@ -170,38 +144,11 @@ class ConnectFourUI(discord.ui.View):
             elif winner == 2:
                 wins_b += 1
                 losses_a += 1
+            
+            self.db.connectfour_user_insert(game["player1_id"], new_rating_a, games_played_a, wins_a, losses_a)
+            self.db.connectfour_user_insert(game["player2_id"], new_rating_b, games_played_b, wins_b, losses_b)
 
-            self.cursor.execute("""
-                INSERT INTO connect_four_user (id, rating, games_played, wins, losses)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    rating = excluded.rating,
-                    games_played = excluded.games_played,
-                    wins = excluded.wins,
-                    losses = excluded.losses;
-            """, (player1_id, new_rating_a, games_played_a, wins_a, losses_a))
-
-            self.cursor.execute("""
-                INSERT INTO connect_four_user (id, rating, games_played, wins, losses)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    rating = excluded.rating,
-                    games_played = excluded.games_played,
-                    wins = excluded.wins,
-                    losses = excluded.losses;
-            """, (player2_id, new_rating_b, games_played_b, wins_b, losses_b))
-
-            self.conn.commit()
-
-            # await interaction.followup.send(f"🎉 <@{player1_id if winner == 1 else player2_id}> wins!", ephemeral=True)
-
-        await interaction.response.edit_message(embed=render_board(grid, player1_id, player2_id, winner if winner else next_turn, selected_column, winner), view=self)
-
-
-    async def disable_all(self, interaction: discord.Interaction):
-        for item in self.children:
-            if isinstance(item, discord.ui.Button):
-                item.disabled = True
+        await interaction.response.edit_message(embed=render_board(grid, game["player1_id"], game["player2_id"], winner if winner else next_turn, game["selected_column"], winner), view=self)
 
 
     @discord.ui.button(label=">", style=discord.ButtonStyle.primary)
@@ -209,10 +156,7 @@ class ConnectFourUI(discord.ui.View):
         message_id = interaction.message.id
         player_id = interaction.user.id
 
-        self.cursor.execute("SELECT * FROM connect_four WHERE message_id = ?", (message_id,))
-        game = self.cursor.fetchone()
-
-        game_id, player1_id, player2_id, turn, selected_column, grid, message_id, channel_id = game
+        game = self.db.select_connect_four_game(message_id)
 
         selected_column += 1
 
@@ -222,7 +166,7 @@ class ConnectFourUI(discord.ui.View):
 
         grid = json.loads(grid)
 
-        if (turn == 1 and player_id != player1_id) or (turn == 2 and player_id != player2_id):
+        if (game["turn"] == 1 and player_id != game["player1_id"]) or (game["turn"] == 2 and player_id != game["player2_id"]):
             await interaction.response.send_message("It's not your turn!", ephemeral=True)
             return
 
@@ -230,18 +174,22 @@ class ConnectFourUI(discord.ui.View):
             await interaction.response.send_message("Column out of range!", ephemeral=True)
             return
         
-        self.cursor.execute("UPDATE connect_four SET selected_column = ? WHERE game_id = ?", (selected_column, game_id,))
-        self.conn.commit()
+        self.db.connectfour_update_selection(game["game_id"], selected_column)
 
-        await interaction.response.edit_message(embed=render_board(grid, player1_id, player2_id, turn, selected_column), view=self)
+        await interaction.response.edit_message(embed=render_board(grid, game["player1_id"], game["player2_id"], game["turn"], selected_column), view=self)
+
+
+    async def disable_all(self, interaction: discord.Interaction):
+        for item in self.children:
+            if isinstance(item, discord.ui.Button):
+                item.disabled = True
 
 
 class ConnectFourRequestUI(discord.ui.View):
-    def __init__(self):
+    def __init__(self, db):
         super().__init__(timeout=300)
 
-        self.conn = sqlite3.connect('data.db')
-        self.cursor = self.conn.cursor()
+        self.db = db
 
 
     @discord.ui.button(label="Accept", style=discord.ButtonStyle.success)
@@ -256,10 +204,7 @@ class ConnectFourRequestUI(discord.ui.View):
         player1 = interaction.message.interaction_metadata.user.id
         player2 = opponent_id
 
-        # Check if players are already in a game
-        self.cursor.execute("SELECT game_id FROM connect_four WHERE player1_id IN (?, ?) OR player2_id IN (?, ?)", (player1, player2, player1, player2))
-        if self.cursor.fetchone():
-            self.cursor.execute("DELETE FROM connect_four WHERE player1_id IN (?, ?) OR player2_id IN (?, ?)", (player1, player2, player1, player2))
+        self.db.connectfour_game_exists(player1, player2)
 
         # Initialize game state
         grid = [[0] * 7 for _ in range(6)]
@@ -269,9 +214,7 @@ class ConnectFourRequestUI(discord.ui.View):
         await interaction.response.edit_message(embed=render_board(grid, player1, player2, turn, 1), view=view)
         board_msg = interaction.message
 
-        self.cursor.execute("INSERT INTO connect_four (player1_id, player2_id, turn, selected_column, grid, message_id, channel_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                            (player1, player2, turn, 1, json.dumps(grid), board_msg.id, board_msg.channel.id))
-        self.conn.commit()
+        self.db.connectfour_create_game(player1, player2, turn, grid, board_msg)
 
 
     @discord.ui.button(label="Decline", style=discord.ButtonStyle.danger)
@@ -289,34 +232,14 @@ class ConnectFourRequestUI(discord.ui.View):
 class ConnectFour(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.conn = sqlite3.connect('data.db')
-        self.cursor = self.conn.cursor()
-        self.cursor.execute("""
-            CREATE TABLE IF NOT EXISTS connect_four (
-                game_id INTEGER PRIMARY KEY,
-                player1_id INTEGER NOT NULL,
-                player2_id INTEGER NOT NULL,
-                turn INTEGER NOT NULL,
-                selected_column INTEGER DEFAULT 1,
-                grid TEXT NOT NULL,
-                message_id INTEGER NOT NULL,
-                channel_id INTEGER NOT NULL
-            )
-        """)
-        self.cursor.execute("""
-            CREATE TABLE IF NOT EXISTS connect_four_user (
-                id INTEGER PRIMARY KEY,
-                rating INTEGER NOT NULL DEFAULT 100,
-                games_played INTEGER NOT NULL DEFAULT 0,
-                wins INTEGER NOT NULL DEFAULT 0,
-                losses INTEGER NOT NULL DEFAULT 0
-            )
-        """)
-        self.conn.commit()
+        self.db = bot.database
+        self.logger = bot.logger
+        self.languages = bot.languages
+        
 
     @commands.Cog.listener()
     async def on_ready(self):
-        logger.info(f"{__name__} is online!")
+        self.logger.info(f"{__name__} is online!")
 
 
     @app_commands.command(name="connectfour", description="Start a Connect Four game")
@@ -326,24 +249,20 @@ class ConnectFour(commands.Cog):
             await interaction.response.send_message("You cannot play against yourself!", ephemeral=True)
             return
 
-        await interaction.response.send_message(f"{opponent.mention} **{interaction.user.name}** has invited you to a Connect Four match. Would you like to join?", view=ConnectFourRequestUI())
-
-        await asyncio.sleep(300)
-
-        await interaction.response.edit_message
+        await interaction.response.send_message(f"{opponent.mention} **{interaction.user.name}** has invited you to a Connect Four match. Would you like to join?", view=ConnectFourRequestUI(self.db))
 
     
     @app_commands.command(name="connectfour_stats", description="Check your Connect Four stats")
     async def connect_four_stats_command(self, interaction: discord.Interaction):
-        id, rating, games_played, wins, losses = get_or_create_player(self.cursor, interaction.user.id)
+        user = self.db.connectfour_fetch_user(interaction.user.id)
         
         embed = discord.Embed(
             title=f"{interaction.user.display_name}'s Connect Four stats",
             description=f"""
-                Rating: `{rating}`
-                Games played: `{games_played}`
-                Wins: `{wins}`
-                Losses: `{losses}`
+                Rating: `{user["rating"]}`
+                Games played: `{user["games_played"]}`
+                Wins: `{user["wins"]}`
+                Losses: `{user["losses"]}`
             """
         )
 
@@ -351,11 +270,12 @@ class ConnectFour(commands.Cog):
 
     
     @app_commands.command(name="connectfour_leaderboard", description="Shows the top Connect 4 players")
-    async def connect_four_leaderboard_command(self, interaction: discord.Interaction):
-        self.cursor.execute("SELECT * FROM connect_four_user")
-        user_data = self.cursor.fetchall()
+    async def connect_four_leaderboard_command(self, interaction: discord.Interaction, page: int = 1):
+        user_data = self.db.connectfour_fetch_all_users(1)
 
-        user_data = sorted(user_data, key=lambda x: x[1], reverse=True)
+        if not user_data:
+            await interaction.response.send_message("No players found!", ephemeral=True)
+            return
 
         emoji_list = [":first_place:", ":second_place:", ":third_place:"]
 
@@ -364,8 +284,7 @@ class ConnectFour(commands.Cog):
         for user in user_data:
             placement_index = emoji_list[i-1] if i <= 3 else f"#{i}" 
 
-            id, rating, games_played, wins, losses = user
-            description += f"{placement_index} <@{id}> `{rating}`\n"
+            description += f"{placement_index} <@{id}> `{user["rating"]}`\n"
 
             if i >= 10:
                 break
@@ -379,9 +298,6 @@ class ConnectFour(commands.Cog):
         
         await interaction.response.send_message(embed=embed)
 
-
-async def setup(bot):
-    await bot.add_cog(ConnectFour(bot))
 
 def render_board(grid, player1, player2, turn, selected_column, winner=0):
         """Generates the game board as an embed."""
@@ -402,18 +318,6 @@ def update_ratings(rating_a, rating_b, result_a, k_a=32, k_b=32):
 
     return new_rating_a, new_rating_b
 
-def get_or_create_player(cursor, player_id):
-    cursor.execute(
-        "SELECT id, rating, games_played, wins, losses FROM connect_four_user WHERE id = ?",
-        (player_id,)
-    )
-    row = cursor.fetchone()
-
-    if row is None:
-        cursor.execute("INSERT INTO connect_four_user (id) VALUES (?)", (player_id,))
-        return player_id, 100, 0, 0, 0
-
-    return row
 
 def k_factor(games_played):
     if games_played < 5:
@@ -422,3 +326,7 @@ def k_factor(games_played):
         return 40
     else:
         return 20
+    
+
+async def setup(bot):
+    await bot.add_cog(ConnectFour(bot))

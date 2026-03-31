@@ -1,36 +1,14 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-import google.generativeai as genai
 import random
-import os
 import json
 import sqlite3
-import traceback
 import datetime
-import asyncio
-import logging
-from logging.handlers import TimedRotatingFileHandler
 from dataclasses import dataclass
 from datetime import datetime
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-
-handler = TimedRotatingFileHandler(filename='logs/bot.log', encoding='utf-8', when='midnight', interval=1, backupCount=7)
-handler.setFormatter(logging.Formatter('[%(asctime)s] [%(levelname)s/%(name)s]: %(message)s'))
-logger.addHandler(handler)
-
-console_handler = logging.StreamHandler()
-console_handler.setFormatter(logging.Formatter('[%(asctime)s] [%(levelname)s/%(name)s]: %(message)s'))
-logger.addHandler(console_handler)
-
-with open("data/fishing/items.json", "r") as f:
-    ITEM_REGISTRY = json.load(f)
-    logger.debug(f"Loaded item registry with {len(ITEM_REGISTRY)} items")
-
 emojis = None
-logger.debug(f"Loaded emoji mappings!")
 
 biome_level_requirements = {
     "river": 0,
@@ -53,14 +31,22 @@ rarity_colors = [
     discord.Color.orange()
 ]
 
+
 async def item_autocomplete(interaction: discord.Interaction, current: str):
     current = current.lower()
-    matched_items = [item for item in ITEM_REGISTRY if current in item['name'].lower() and item['type'] in ['rod', 'bait', 'accessory']]
+    with open("data/fishing/items.json", "r") as f:
+        item_registry = json.load(f)
+    matched_items = [item for item in item_registry if current in item['name'].lower()]
     return [app_commands.Choice(name=item['name'], value=item['name']) for item in matched_items[:25]]
+
 
 class Fishing(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.logger = bot.logger
+
+        self.ITEM_REGISTRY = self.load_item_registry()
+        self.LOOT_TABLES = self.load_loot_tables()
 
         self.conn = sqlite3.connect('data.db')
         self.conn.row_factory = sqlite3.Row
@@ -80,7 +66,7 @@ class Fishing(commands.Cog):
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 item_id INTEGER,
                 user_id INTEGER,
-                quantity INTEGERL,
+                quantity INTEGER,
                 UNIQUE(item_id, user_id)
             )
         """)
@@ -98,9 +84,9 @@ class Fishing(commands.Cog):
     @commands.Cog.listener()
     async def on_ready(self):
         try:
-            logger.info(f"{__name__} is online!")
+            self.logger.info(f"{__name__} is online!")
         except Exception as e:
-            logger.error(f"Error during on_ready: {e}")
+            self.logger.error(f"Error during on_ready: {e}")
     
     
     @app_commands.checks.cooldown(1, 5.0, key=lambda i: (i.user.id))
@@ -122,20 +108,28 @@ class Fishing(commands.Cog):
         weights = [1, 4, 20, 65, 195, 360]
         rarity_levels = [6, 5, 4, 3, 2, 1]
         highest_rarity = 0
+        crate_chance = 0.1
         
-        rolls = 1
+        max_lure = 100
+        lure = random.randint(1, max_lure) + random.randint(1, max_lure) // 2 # triangular distribution of lures
         catches = []
 
-        for _ in range(rolls):
+        for _ in range(lure):
             rarity = random.choices(rarity_levels, weights)[0]
-            highest_rarity = max(highest_rarity, rarity)
 
-            fish_items = [item for item in ITEM_REGISTRY if item['rarity'] == rarity and current_biome in item['biome']]
+            if random.random() < crate_chance:
+                rarity = max(3, rarity)
+                fish_items = [item for item in self.ITEM_REGISTRY if item['rarity'] == rarity and item['type'] == "crate"]
+            else:
+                fish_items = [item for item in self.ITEM_REGISTRY if item['rarity'] == rarity and item['biome'] == current_biome and item['type'] == "fish"]
+
             if not fish_items:
-                logger.warning(f"No fish found for rarity {rarity} in biome {current_biome}")
+                self.logger.warning(f"No fish found for rarity {rarity} in biome {current_biome}")
                 continue
+
             catch = random.choice(fish_items)
             catches.append(dict(catch))
+            highest_rarity = max(highest_rarity, rarity)
         
         xp_gain = int(sum(catch['value'] for catch in catches) / 2)
         xp += xp_gain
@@ -172,10 +166,10 @@ class Fishing(commands.Cog):
         embed = discord.Embed(
             title=f"Caught fish",
             description=f"""
-                            {description}
-                            {level_label}
-                            {self.xp_bar(xp, max_xp)} {xp:,}/{max_xp:,} {f'`+{xp_gain}`' if xp_gain > 0 else ''}
-                        """,
+                {description}
+                {level_label}
+                {self.xp_bar(xp, max_xp)} {xp:,}/{max_xp:,} {f'`+{xp_gain}`' if xp_gain > 0 else ''}
+            """,
             color=rarity_colors[highest_rarity]
         )
         embed.set_footer(text=f"Biome: {current_biome.capitalize()}")
@@ -189,13 +183,83 @@ class Fishing(commands.Cog):
     async def fish_error(self, interaction: discord.Interaction, error):
         if isinstance(error, app_commands.CommandOnCooldown):
             await interaction.response.send_message(f"You are on cooldown! Try again <t:{int(error.retry_after + datetime.now().timestamp())}:R>", ephemeral=True)
+
+
+    @app_commands.command(name="use_item", description="Use a fishing item from your inventory")
+    @app_commands.autocomplete(item_name=item_autocomplete)
+    async def use_item_command(self, interaction: discord.Interaction, item_name: str):
+        matched_item = self.get_item(item_name)
+        if not matched_item:
+            await interaction.response.send_message("No such item exists. Try again!", ephemeral=True)
+            return
+
+        self.cursor.execute("""
+            SELECT quantity FROM fish_inventory WHERE user_id = ? AND item_id = ?
+        """, (interaction.user.id, matched_item['id'],))
+        item_stack = self.cursor.fetchone()
+        if item_stack is None:
+            await interaction.response.send_message("You don't have that item in your inventory!", ephemeral=True)
+            return
+        
+        quantity = item_stack[0]
+
+        if quantity <= 0:
+            await interaction.response.send_message("You don't have that item in your inventory!", ephemeral=True)
+            return
+
+        if matched_item['type'] == "crate": # crate opening logic
+            loot_table = self.LOOT_TABLES.get(matched_item['internal_name'], None)
+            if loot_table is None:
+                self.logger.error(f"No loot table found for crate: {matched_item['internal_name']}")
+                await interaction.response.send_message("An error occurred while opening the crate. No loot table found.", ephemeral=True)
+                return
+            
+            rolls = loot_table.get("rolls", 1)
+            entries = loot_table.get("entries", None)
+            if entries is None:
+                self.logger.error(f"No entries found in loot table for crate: {matched_item['internal_name']}")
+                await interaction.response.send_message("An error occurred while opening the crate. No entries found in loot table.", ephemeral=True)
+                return
+            
+            weights = [entry['weight'] for entry in entries]
+            item_names = {}
+            for _ in range(rolls):
+                loot_entry = random.choices(entries, weights=weights)[0]
+
+                loot_item = self.get_item(loot_entry['name'])
+                if loot_item is None:
+                    self.logger.error(f"Invalid loot entry in loot table: {loot_entry}")
+                    await interaction.response.send_message("An error occurred while opening the crate. Invalid loot entry in loot table.", ephemeral=True)
+                    return
+                
+                self.cursor.execute("""
+                    INSERT INTO fish_inventory (item_id, user_id, quantity)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(item_id, user_id)
+                    DO UPDATE SET quantity = quantity + excluded.quantity
+                    """, (loot_item["id"], interaction.user.id, 1))
+                
+                loot_item_name = f"{loot_item['name']} {':star:' * loot_item['rarity']}"
+                item_names[loot_item_name] = item_names.get(loot_item_name, 0) + 1
+
+            self.cursor.execute("""
+                UPDATE fish_inventory SET quantity = quantity - 1 WHERE user_id = ? AND item_id = ?
+            """, (interaction.user.id, matched_item['id'],))
+                
+            self.conn.commit()
+
+            loot_summary = "\n".join([f"`x{quantity}` **{name}**" for name, quantity in item_names.items()])
+            
+            await interaction.response.send_message(f"You opened the **{matched_item['name']}** and received: \n{loot_summary}!", ephemeral=True)
+            
+
     
 
     @app_commands.command(name="inventory", description="Check your fish inventory")
+    @app_commands.autocomplete(item_name=item_autocomplete)
     async def inventory_command(self, interaction: discord.Interaction, item_name: str = None):
         if item_name:
-            item_name_internalized = item_name.lower().replace(" ", "_")
-            matched_item = next((item for item in ITEM_REGISTRY if item['internal_name'] == item_name_internalized), None)
+            matched_item = self.get_item(item_name)
             if not matched_item:
                 await interaction.response.send_message("No such item exists. Try again!", ephemeral=True)
                 return
@@ -231,7 +295,7 @@ class Fishing(commands.Cog):
 
         description = ""
         for item_id, quantity in inventory_data[:10]:
-            item_info = next((item for item in ITEM_REGISTRY if item['id'] == item_id), None)
+            item_info = next((item for item in self.ITEM_REGISTRY if item['id'] == item_id), None)
             if item_info:
                 description += f"`x{quantity}` **{item_info['name']}**\n"
 
@@ -291,11 +355,86 @@ class Fishing(commands.Cog):
         if not matched_item:
             await interaction.response.send_message("No such item exists. Try again!", ephemeral=True)
             return
+        
+        self.cursor.execute(
+            "SELECT quantity FROM fish_inventory WHERE user_id = ? AND item_id = ?",
+            (interaction.user.id, matched_item['id'],))
+        item_stack = self.cursor.fetchone()
+        if item_stack is None:
+            await interaction.response.send_message("You don't have that item in your inventory!", ephemeral=True)
+            return
+        
+        quantity = item_stack[0]
+
+        if quantity <= 0:
+            await interaction.response.send_message("You don't have that item in your inventory!", ephemeral=True)
+            return
+        
+        if matched_item['type'] == "accessory":
+            self.cursor.execute(
+                "SELECT * FROM fish_equipment WHERE user_id = ? AND item_id = ?",
+                (interaction.user.id, matched_item['id'],)
+            )
+            equipped_item = self.cursor.fetchone()
+
+            if equipped_item:
+                slot_name = equipped_item['slot'].replace(".", " ").capitalize()
+                await interaction.response.send_message(f"You already have that item equipped in the *{slot_name}* slot!", ephemeral=True)
+                return
+
+            self.cursor.execute(
+                "SELECT * FROM fish_equipment WHERE user_id = ? AND slot LIKE ?",
+                (interaction.user.id, "accessory.%")
+            )
+            
+            equipped_accessories = self.cursor.fetchall()
+            accessory_index = len(equipped_accessories) + 1
+            accessory_limit = 6
+
+            if accessory_index > accessory_limit:
+                await interaction.response.send_message(f"You can only equip {accessory_limit} accessories at a time!", ephemeral=True)
+                return
+
+            self.cursor.execute(
+                "INSERT INTO fish_equipment (user_id, slot, item_id) VALUES (?, ?, ?)",
+                (interaction.user.id, f"accessory.{accessory_index}", matched_item['id'],)
+            )
+            self.cursor.execute(
+                "UPDATE fish_inventory SET quantity = quantity - 1 WHERE user_id = ? AND item_id = ?",
+                (interaction.user.id, matched_item['id'],)
+            )
+            
+            self.conn.commit()
+
+            slot_name = f"Accessory {accessory_index}"
+            await interaction.response.send_message(f"Equipped item *{matched_item['name']}* in the {slot_name} slot!")
+        else:
+            await interaction.response.send_message("This item cannot be equipped!", ephemeral=True)
+    
+    @equip_command.error
+    async def equip_command_error(self, interaction: discord.Interaction, error):
+        self.logger.error(f"An error occurred in equip_command: {error}")
+        await interaction.response.send_message("An error occurred while equipping the item. Please try again later.", ephemeral=True)
+
+    
+    @app_commands.command(name="unequip", description="Unequip a fishing item and return it to your inventory.")
+    @app_commands.autocomplete(item_name=item_autocomplete)
+    async def unequip_command(self, interaction: discord.Interaction, item_name: str):
+        matched_item = self.get_item(item_name)
+        if not matched_item:
+            await interaction.response.send_message("No such item exists. Try again!", ephemeral=True)
+            return
+        
+        self.cursor.execute("""
+            SELECT item_id FROM fish_equipment WHERE user_id = ? AND item_id = ?
+        """, (interaction.user.id, matched_item['id'],))
+        
+        await interaction.response.send_message(f"Unequipped item *{matched_item['name']}* from the *slot_name* slot and returned it to your inventory!")
 
 
-    def get_item(self, item_name: str):
+    def get_item(self, item_name: str) -> dict:
         item_name_internalized = item_name.lower().replace(" ", "_")
-        matched_item = next((item for item in ITEM_REGISTRY if item['internal_name'] == item_name_internalized), None)
+        matched_item = next((item for item in self.ITEM_REGISTRY if item['internal_name'] == item_name_internalized), None)
         return matched_item
 
 
@@ -384,7 +523,7 @@ class Fishing(commands.Cog):
             await interaction.response.send_message(embed=embed)
 
         except ValueError: # if query can't be parsed into an id
-            start_time = datetime.datetime.now()
+            start_time = datetime.now()
 
             if filter_rarity:
                 self.cursor.execute("SELECT id, user_id, name, rarity FROM infi_fish WHERE name LIKE ? AND rarity = ?", (f"%{query}%", filter_rarity))
@@ -392,7 +531,7 @@ class Fishing(commands.Cog):
                 self.cursor.execute("SELECT id, user_id, name, rarity FROM infi_fish WHERE name LIKE ?", (f"%{query}%",))
             fish_data = self.cursor.fetchall()
 
-            end_time = datetime.datetime.now()
+            end_time = datetime.now()
             query_time = int((end_time - start_time).microseconds / 1000)
 
             fish_data = sorted(fish_data, key=lambda x: x[0], reverse=True)
@@ -475,6 +614,20 @@ class Fishing(commands.Cog):
     # xp growth algorithm
     def xp_required(self, level, base_xp=100, growth=15, scale=1.1):
         return int(base_xp + (level ** 2 * growth) + (level * scale * base_xp))
+    
+
+    def load_item_registry(self):
+        with open("data/fishing/items.json", "r") as f:
+            item_registry = json.load(f)
+            self.logger.debug(f"Loaded item registry with {len(item_registry)} fishing items")
+            return item_registry
+        
+    
+    def load_loot_tables(self):
+        with open("data/fishing/loot_tables.json", "r") as f:
+            loot_tables = json.load(f)
+            self.logger.debug(f"Loaded {len(loot_tables)} fishing loot tables")
+            return loot_tables
        
 
 async def setup(bot):

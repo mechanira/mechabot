@@ -4,22 +4,12 @@ from discord import app_commands
 import sqlite3
 import logging
 from logging.handlers import TimedRotatingFileHandler
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-
-handler = TimedRotatingFileHandler(filename='logs/bot.log', encoding='utf-8', when='midnight', interval=1, backupCount=7)
-handler.setFormatter(logging.Formatter('[%(asctime)s] [%(levelname)s/%(name)s]: %(message)s'))
-logger.addHandler(handler)
-
-console_handler = logging.StreamHandler()
-console_handler.setFormatter(logging.Formatter('[%(asctime)s] [%(levelname)s/%(name)s]: %(message)s'))
-logger.addHandler(console_handler)
     
 
 class Roles(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self.logger = bot.logger
 
         self.conn = sqlite3.connect('data.db')
         self.cursor = self.conn.cursor()
@@ -43,7 +33,7 @@ class Roles(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self):
-        logger.info(f"{__name__} is online!")
+        self.logger.info(f"{__name__} is online!")
 
 
     role_group = app_commands.Group(name="role", description="Custom role management commands")
@@ -210,7 +200,7 @@ class Roles(commands.Cog):
             else:
                 return discord.Color.default()
         except Exception as e:
-            logger.error(f"Error parsing color: {e}")
+            self.logger.error(f"Error parsing color: {e}")
             return discord.Color.default()
 
 async def setup(bot):

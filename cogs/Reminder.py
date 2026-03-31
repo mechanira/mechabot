@@ -69,7 +69,7 @@ class Reminder(commands.Cog):
         user = user or interaction.user
         channel_id = interaction.channel.id if not send_dm else None
 
-        self.db.insertReminder(user.id, channel_id, label, remind_at, None, send_dm)
+        self.db.insert_reminder(user.id, channel_id, label, remind_at, None, send_dm)
 
         human_time = datetime.fromtimestamp(remind_at, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
 
@@ -95,7 +95,7 @@ class Reminder(commands.Cog):
     @app_commands.command(name="reminders", description="View all your active reminders")
     async def reminders_command(self, interaction: discord.Interaction):
 
-        reminders = self.db.selectReminder_foruser(interaction.user.id)
+        reminders = self.db.fetch_all_user_reminders(interaction.user.id)
 
         if not reminders:
             await interaction.response.send_message(self.languages.getText("reminders_command.error.no_reminders"), ephemeral=True)
@@ -107,7 +107,7 @@ class Reminder(commands.Cog):
         )
 
         for index, (label, daily_time, send_dm) in enumerate(reminders, start=1):
-            delivery_method = self.languages.getText("reminder.delivery_method.dm") if send_dm else "Channel"
+            delivery_method = self.languages.getText("reminder.delivery_method.dm") if send_dm else self.languages.getText("reminder.delivery_method.channel")
             embed.add_field(
                 name=self.languages.getText("reminders_command.reminder_index", index),
                 value=self.languages.getText("reminders_command.reminder_details", label, daily_time, delivery_method),
@@ -126,24 +126,23 @@ class Reminder(commands.Cog):
     async def check_reminders(self):
         """Checks for due reminders and sends messages."""
 
-        reminders = self.db.selectReminder_due(
+        reminders = self.db.select_reminder_due(
             int(time.time()),
             datetime.now(timezone.utc).strftime("%H:%M")
         )
 
         for reminder in reminders:
-            reminder_id, user_id, channel_id, label, send_dm, daily = reminder
-            user = self.bot.get_user(user_id)
+            user = self.bot.get_user(reminder["user_id"])
 
-            if send_dm and user:
+            if reminder["send_dm"] and user:
                 try:
-                    await user.send(self.languages.getText("check_reminders.dm_reminder", label))
+                    await user.send(self.languages.getText("check_reminders.dm_reminder", reminder["label"]))
                 except discord.Forbidden:
-                    self.logger.error(f"Could not DM {user_id}, they might have DMs disabled.")
-            elif channel_id:
-                channel = self.bot.get_channel(channel_id)
+                    self.logger.error(f"Could not DM {reminder["user_id"]}, they might have DMs disabled.")
+            elif reminder["channel_id"]:
+                channel = self.bot.get_channel(reminder["channel_id"])
                 if channel:
-                    await channel.send(self.languages.getText("check_reminders.channel_reminder", user_id, label))
+                    await channel.send(self.languages.getText("check_reminders.channel_reminder", reminder["user_id"], reminder["label"]))
 
 
 async def setup(bot):

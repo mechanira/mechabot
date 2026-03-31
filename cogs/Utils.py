@@ -14,16 +14,6 @@ from logging.handlers import TimedRotatingFileHandler
 from petpetgif import petpet
 import sqlite3
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-
-handler = TimedRotatingFileHandler(filename='logs/bot.log', encoding='utf-8', when='midnight', interval=1, backupCount=7)
-handler.setFormatter(logging.Formatter('[%(asctime)s] [%(levelname)s/%(name)s]: %(message)s'))
-logger.addHandler(handler)
-
-console_handler = logging.StreamHandler()
-console_handler.setFormatter(logging.Formatter('[%(asctime)s] [%(levelname)s/%(name)s]: %(message)s'))
-logger.addHandler(console_handler)
 
 kaomoji = [">.<", ":3", "^-^", "^.^", ">w<", "^.~", "~.^", ">.<", "^o^", "^_^", ">.>", "^3^"]
 uwu_pattern = [
@@ -77,6 +67,7 @@ def uwuify(string: str):
 class Utils(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self.logger = bot.logger
         self.uwuified = []
 
         self.conn = sqlite3.connect('data.db')
@@ -84,7 +75,7 @@ class Utils(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self):
-        logger.info(f"{__name__} is online!")
+        self.logger.info(f"{__name__} is online!")
 
 
     @commands.Cog.listener()
@@ -103,7 +94,7 @@ class Utils(commands.Cog):
                     webhook = await channel.create_webhook(name="mechabot")
 
                 uwuified_message = uwuify(message.content)
-                logger.debug(f"Message uwuified: {uwuified_message}")
+                self.logger.debug(f"Message uwuified: {uwuified_message}")
 
                 await message.delete()
                 await webhook.send(
@@ -131,7 +122,7 @@ class Utils(commands.Cog):
                 await message.channel.send(":3")
 
         except Exception as e:
-            logger.error(e)
+            self.logger.error(e)
 
 
     @app_commands.command(name="ping", description="Gets the API latency")
@@ -180,7 +171,7 @@ class Utils(commands.Cog):
 
             await interaction.response.send_message(selected_video[:-4], file=discord.File(video_path))
         except Exception as e:
-            logger.error(e)
+            self.logger.error(e)
 
 
     @app_commands.command(name="meter", description="Create a random meter")

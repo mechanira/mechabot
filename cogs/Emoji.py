@@ -8,25 +8,16 @@ import re
 import logging
 from logging.handlers import TimedRotatingFileHandler
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-
-handler = TimedRotatingFileHandler(filename='logs/bot.log', encoding='utf-8', when='midnight', interval=1, backupCount=7)
-handler.setFormatter(logging.Formatter('[%(asctime)s] [%(levelname)s/%(name)s]: %(message)s'))
-logger.addHandler(handler)
-
-console_handler = logging.StreamHandler()
-console_handler.setFormatter(logging.Formatter('[%(asctime)s] [%(levelname)s/%(name)s]: %(message)s'))
-logger.addHandler(console_handler)
 
 class Emoji(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self.logger = bot.logger
 
 
     @commands.Cog.listener()
     async def on_ready(self):
-        logger.info(f"{__name__} is online!")
+        self.logger.info(f"{__name__} is online!")
 
 
     group = app_commands.Group(name="emoji", description="...")
@@ -64,7 +55,7 @@ class Emoji(commands.Cog):
                 await interaction.response.send_message("Invalid emojis", ephemeral=True)
 
         url = f"https://emoji-kitchen-api.vercel.app/mix/{emoji_1}/{emoji_2}"
-        logger.debug(url)
+        self.logger.debug(url)
 
         try:
             async with aiohttp.ClientSession() as session:
@@ -76,7 +67,7 @@ class Emoji(commands.Cog):
                     else:
                         await interaction.response.send_message(f"Failed to fetch image.\nHTTP Status: {response.status}")
         except Exception as e:
-            logger.error(f"An error occured: {e}")
+            self.logger.error(f"An error occured: {e}")
 
 
 async def setup(bot):

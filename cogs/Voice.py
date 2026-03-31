@@ -10,25 +10,16 @@ import yt_dlp
 import logging
 from logging.handlers import TimedRotatingFileHandler
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-
-handler = TimedRotatingFileHandler(filename='logs/bot.log', encoding='utf-8', when='midnight', interval=1, backupCount=7)
-handler.setFormatter(logging.Formatter('[%(asctime)s] [%(levelname)s/%(name)s]: %(message)s'))
-logger.addHandler(handler)
-
-console_handler = logging.StreamHandler()
-console_handler.setFormatter(logging.Formatter('[%(asctime)s] [%(levelname)s/%(name)s]: %(message)s'))
-logger.addHandler(console_handler)
 
 class Voice(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self.logger = bot.logger
         self.voice_clients = {}
 
     @commands.Cog.listener()
     async def on_ready(self):
-        logger.info(f"{__name__} is online!")
+        self.logger.info(f"{__name__} is online!")
 
     """
     @commands.Cog.listener()
@@ -93,8 +84,8 @@ class Voice(commands.Cog):
         filename = "downloads/ytdl"
         cookies_path = "./assets/youtube_cookies.txt"
 
-        logger.info(f"Cookies exists: {os.path.exists(cookies_path)}")
-        logger.info(f"Cookies size: {os.path.getsize(cookies_path)}")
+        self.logger.info(f"Cookies exists: {os.path.exists(cookies_path)}")
+        self.logger.info(f"Cookies size: {os.path.getsize(cookies_path)}")
 
         ydl_opts = {
             "format": "bestaudio[abr<=50]/bestaudio/best",
@@ -193,7 +184,7 @@ class Voice(commands.Cog):
             response = requests.put(url, data=file, headers=headers)
 
             if response.status_code != 200:
-                logger.error(f"Audio file upload failed: {response.status_code}, {response.text}")
+                self.logger.error(f"Audio file upload failed: {response.status_code}, {response.text}")
 
 
     def send_voice_message(self, channel_id, uploaded_filename):
@@ -220,7 +211,7 @@ class Voice(commands.Cog):
         response = requests.post(url, json=data, headers=headers)
 
         if response.status_code != 200:
-            logger.error(f"Voice message upload failed: {response.status_code}, {response.text}")
+            self.logger.error(f"Voice message upload failed: {response.status_code}, {response.text}")
 
 
 async def setup(bot):

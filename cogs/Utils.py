@@ -1,21 +1,23 @@
 import discord
-from discord.ext import commands, tasks
+from discord.ext import commands
 from discord import app_commands
+from discord.app_commands import Choice
 import random
 import os
-import traceback
 import re
 import aiohttp
 import numpy as np
 from PIL import Image
 from io import BytesIO
-import logging
-from logging.handlers import TimedRotatingFileHandler
 from petpetgif import petpet
 import sqlite3
-
+import deepl
+import zipfile
+import json
 
 kaomoji = [">.<", ":3", "^-^", "^.^", ">w<", "^.~", "~.^", ">.<", "^o^", "^_^", ">.>", "^3^"]
+meows = ["meow", "nya", "mrow", "mrrp", "mreow", "mew", "miau"]
+
 uwu_pattern = [
     (r'[rl]', 'w'),
     (r'[RL]', 'W'),
@@ -24,22 +26,51 @@ uwu_pattern = [
     (r'N([AEIOU])', 'NY\\g<1>'),
     (r'ove', 'uv'),
 ]
-stutter_chance = 0.25
-kaomoji_chance = 0.25
+lolcat_pattern = {
+    'er': 'r',
+    'you': 'u',
+    'have': 'haz',
+    'can i': 'i can',
+    's': 'z',
+    'th': 'd',
+    'y': 'eh'
+}
 
-meows = ["meow", "nya", "mrow", "mrrp"]
+eight_ball_responses = [
+    "It is certain.", "It is decidedly so.", "Without a doubt.",
+    "Yes - definitely.", "You may rely on it.", "As I see it, yes.",
+    "Most likely.", "Outlook good.", "Yes.", "Signs point to yes.",
+    
+    "Reply hazy, try again.", "Ask again later.", "Better not tell you now.",
+    "Cannot predict now.", "Concentrate and ask again.",
+    
+    "Don't count on it.", "My reply is no.", "My sources say no.",
+    "Outlook not so good.", "Very doubtful."
+]
 
-def uwuify(string: str):
+stutter_chance = 0.5
+kaomoji_chance = 0.5
+
+
+def translate_uwu(string: str):
     words = string.split(' ')
 
     for idx, word in enumerate(words):
         if not word:
             continue
-
+        
+        # link
         if re.search(r'((http:|https:)//[^ \<]*[^ \<\.])', word):
+            words[idx] = word
+            continue
+        
+        # discord mention, emoji
+        if word[0] == '@' or word[0] == '#' or word[0] == ':' or word[0] == '<':
+            words[idx] = word
             continue
 
-        if word[0] == '@' or word[0] == '#' or word[0] == ':' or word[0] == '<':
+        if word in kaomoji:
+            words[idx] = word
             continue
 
         for pattern, substitution in uwu_pattern:
@@ -62,6 +93,10 @@ def uwuify(string: str):
         words[idx] = (_word or word)
 
     return ' '.join(words)
+
+
+def translate_lolcat(string: str):
+    pass
     
 
 class Utils(commands.Cog):
@@ -69,6 +104,16 @@ class Utils(commands.Cog):
         self.bot = bot
         self.logger = bot.logger
         self.uwuified = []
+        self.DEEPL_API_KEY = os.getenv("DEEPL_API_KEY")
+        self.deepl_client = deepl.DeepLClient(self.DEEPL_API_KEY)
+
+        self.ctx_menus = {
+            "translate": app_commands.ContextMenu(
+                name="Translate",
+                callback=self.translate_context_menu
+            )
+        }
+        self.bot.tree.add_command(self.ctx_menus["translate"])
 
         self.conn = sqlite3.connect('data.db')
         self.cursor = self.conn.cursor()
@@ -93,14 +138,27 @@ class Utils(commands.Cog):
                 if webhook is None:
                     webhook = await channel.create_webhook(name="mechabot")
 
-                uwuified_message = uwuify(message.content)
+                uwuified_message = translate_uwu(message.content)
                 self.logger.debug(f"Message uwuified: {uwuified_message}")
 
                 await message.delete()
+
+                reference_message = None
+                if message.reference and message.mentions:
+                    try:
+                        reference_message = await channel.fetch_message(message.reference.message_id)
+                    except:
+                        pass
+                
+                reply_substring = f"-# [↪]({reference_message.jump_url}) {message.mentions[0].mention} {reference_message.content}\n" if message.reference and message.mentions else ""
+
+                webhook_allowed_mentions = discord.AllowedMentions(users=False, roles=False, everyone=False)
+
                 await webhook.send(
-                    content=uwuified_message,
+                    content=reply_substring + uwuified_message,
                     username=message.author.display_name,
-                    avatar_url=message.author.display_avatar.url
+                    avatar_url=message.author.display_avatar.url,
+                    allowed_mentions=webhook_allowed_mentions
                 )
 
             stripped_content = message.content.lower().strip("")
@@ -180,8 +238,28 @@ class Utils(commands.Cog):
         await interaction.response.send_message(f"{user.display_name} is **{random.randint(0, 100)}% {meter}**")
 
 
-    @app_commands.checks.bot_has_permissions(manage_messages=True, manage_webhooks=True)
-    @app_commands.command(name="uwu", description="Toggle message uwuifier")
+    @app_commands.choices(translation=[
+        Choice(name="UwU", value="uwuspeak"),
+        Choice(name="LOLCAT", value="lolspeak"),
+        Choice(name="Pirate", value="pirate"),
+        Choice(name="Shakespearean", value="shakespeare"),
+        Choice(name="uʍoᗡ ǝpᴉsd∩", value="upside_down"),
+        Choice(name="Disable", value="disable")
+    ])
+    @app_commands.command(name="autotranslate", description="Enable realtime autotranslation of your messages")
+    async def autotranslate_command(self, interaction: discord.Interaction, translation: Choice[str]):
+        match translation.value:
+            case "uwuspeak":
+                pass
+
+
+    async def translate_context_menu(self, interaction: discord.Interaction, message: discord.Message):
+        result = self.deepl_client.translate_text(message.content, target_lang="EN-US")
+        await interaction.response.send_message(result.text, ephemeral=True)
+
+
+    # @app_commands.checks.bot_has_permissions(manage_messages=True, manage_webhooks=True)
+    # @app_commands.command(name="uwu", description="Toggle message uwuifier")
     async def uwu(self, interaction: discord.Interaction):
         # checks if bot has permission to manage messages and manage webhooks in the channel
         if not interaction.channel.permissions_for(interaction.guild.me).manage_messages or not interaction.channel.permissions_for(interaction.guild.me).manage_webhooks:
@@ -195,7 +273,7 @@ class Utils(commands.Cog):
             self.uwuified.remove(interaction.user.id)
             await interaction.response.send_message("Turned uwuifier off")
     
-    @uwu.error
+    # @uwu.error
     async def uwu_error(self, interaction: discord.Interaction, error):
         if isinstance(error, app_commands.errors.BotMissingPermissions):
             await interaction.response.send_message("I need the **Manage Messages** and **Manage Webhooks** permissions to use this feature.", ephemeral=True)
@@ -288,12 +366,11 @@ class Utils(commands.Cog):
         await interaction.user.remove_roles(unverified_role)
         await interaction.response.send_message("User has been verified and given access to the server!")
 
-
-    @commands.Cog.listener()
-    async def on_member_join(self, member: discord.Member):
-        if member.guild.id == 1183359049287340062:     
-            vetting_role = discord.utils.get(member.guild.roles, name="Vetting pending")
-            await member.add_roles(vetting_role)
+    # @commands.Cog.listener()
+    # async def on_member_join(self, member: discord.Member):
+    #    if member.guild.id == 1183359049287340062:     
+    #        vetting_role = discord.utils.get(member.guild.roles, name="Vetting pending")
+    #        await member.add_roles(vetting_role)
 
 
     @app_commands.command(name="pet", description="Pet someone")
@@ -311,6 +388,78 @@ class Utils(commands.Cog):
         petpet.make(source, dest)
         dest.seek(0)
         await interaction.response.send_message(file=discord.File(dest, filename=f"pet_{interaction.id}.gif"))
+
+    
+    @app_commands.command(name="8ball", description="Ask the magic 8 ball a question")
+    async def eight_ball(self, interaction: discord.Interaction, question: str):
+        response = random.choice(eight_ball_responses)
+        await interaction.response.send_message(f"\"{question}\"\n**:8ball: {response}**")
+
+
+    @app_commands.command(name="pack_emojiful", description="Create an Emojiful datapack from server emojis")
+    async def pack_emojiful(self, interaction: discord.Interaction):
+        if interaction.guild is None:
+            await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
+            return
+
+        emojis = interaction.guild.emojis
+        if not emojis:
+            await interaction.response.send_message("This server has no custom emojis to pack.", ephemeral=True)
+            return
+
+        """
+        datapack structure:
+            emojiful_pack.zip/
+                pack.mcmeta
+                data/
+                    emojiful/
+                        recipe/
+                            emoji.json
+
+        emoji recipe structure:
+        {
+            "category": "server name",
+            "name": "emoji name",
+            "url": "https://cdn.discordapp.com/emojis/1105820265327370312.png",
+            "type": "emojiful:emoji_recipe"
+        }
+        """
+
+        self.logger.info(f"Creating Emojiful datapack for server {interaction.guild.name} with {len(emojis)} emojis")
+
+        await interaction.response.defer()
+
+        zip_buffer = BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w') as zip_file:
+            # create pack.mcmeta
+            pack_mcmeta = {
+                "pack": {
+                    "pack_format": 48,
+                    "description": f"Emojiful datapack for {interaction.guild.name}"
+                }
+            }
+            bytes_pack_mcmeta = json.dumps(pack_mcmeta, indent=4).encode('utf-8')
+            zip_file.writestr("pack.mcmeta", bytes_pack_mcmeta)
+
+            self.logger.debug("Added pack.mcmeta to datapack")
+
+            # create emoji recipes
+            for emoji in emojis:
+                emoji_name_lowercase = emoji.name.lower()
+
+                recipe = {
+                    "category": interaction.guild.name,
+                    "name": emoji_name_lowercase,
+                    "url": str(emoji.url),
+                    "type": "emojiful:emoji_recipe"
+                }
+                bytes_recipe = json.dumps(recipe, indent=4).encode('utf-8')
+                zip_file.writestr(f"data/emojiful/recipe/{emoji_name_lowercase}.json", bytes_recipe)
+
+                self.logger.debug(f"Added emoji {emoji.name} to datapack")
+            
+        zip_buffer.seek(0)
+        await interaction.followup.send(file=discord.File(zip_buffer, filename=f"{interaction.guild.name}_emojiful_pack.zip"))
 
 
 async def setup(bot):

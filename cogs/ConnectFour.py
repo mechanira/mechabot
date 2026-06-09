@@ -273,6 +273,8 @@ class ConnectFour(commands.Cog):
     async def connect_four_leaderboard_command(self, interaction: discord.Interaction, page: int = 1):
         user_data = self.db.connectfour_fetch_all_users(1)
 
+        self.logger.debug(user_data)
+
         if not user_data:
             await interaction.response.send_message("No players found!", ephemeral=True)
             return

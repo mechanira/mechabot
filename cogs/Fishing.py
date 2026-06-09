@@ -110,7 +110,7 @@ class Fishing(commands.Cog):
         highest_rarity = 0
         crate_chance = 0.1
         
-        max_lure = 100
+        max_lure = 5
         lure = random.randint(1, max_lure) + random.randint(1, max_lure) // 2 # triangular distribution of lures
         catches = []
 
@@ -131,7 +131,7 @@ class Fishing(commands.Cog):
             catches.append(dict(catch))
             highest_rarity = max(highest_rarity, rarity)
         
-        xp_gain = int(sum(catch['value'] for catch in catches) / 2)
+        xp_gain = int(sum(catch['value'] for catch in catches))
         xp += xp_gain
         old_level = level
 
@@ -318,7 +318,7 @@ class Fishing(commands.Cog):
         app_commands.Choice(name="Sky", value="sky"),
         app_commands.Choice(name="Space", value="space")
         ])
-    async def biomes_command(self, interaction: discord.Interaction, biome: app_commands.Choice[str] = None):
+    async def biomes_command(self, interaction: discord.Interaction, biome: app_commands.Choice[str] =None ):
         if biome == None:
             description = ""
             for k, v in biome_level_requirements.items():

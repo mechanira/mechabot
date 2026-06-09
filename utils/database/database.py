@@ -6,7 +6,7 @@ class DBManager:
 
 
     def __init__(self):
-        self.conn = sqlite3.connect('data.db')
+        self.conn = sqlite3.connect('test_data.db')
         self.conn.row_factory = sqlite3.Row
         self.cursor = self.conn.cursor()
 

@@ -21,7 +21,7 @@ bot = commands.Bot(command_prefix="m.",
 os.makedirs("logs", exist_ok=True)
 
 logger = logging.getLogger("mechabot")
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
 
 if not logger.handlers:
     handler = TimedRotatingFileHandler(

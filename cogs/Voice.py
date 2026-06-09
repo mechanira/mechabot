@@ -116,8 +116,9 @@ class Voice(commands.Cog):
 
     @app_commands.command(name="sam", description="Software Automatic Mouth (SAM) text-to-speech")
     async def sam(self, interaction: discord.Interaction, text: str, voice_message: bool = False):
-        output_file = self.generate_sam_voice(text, f"sam_{interaction.id}.wav")
-        file = discord.File(output_file, filename=output_file)
+        output_path = "sam_output.wav"
+        output_file = self.generate_sam_voice(text, output_path)
+        file = discord.File(output_file, filename=f"sam_output_{interaction.id}.wav")
 
         await interaction.response.send_message(file=file, ephemeral=voice_message)
 

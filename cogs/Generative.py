@@ -14,27 +14,7 @@ class Generative(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.logger = bot.logger
-
-        self.conn = sqlite3.connect('data.db')
-        self.cursor = self.conn.cursor()
-        self.cursor.execute("""
-            CREATE TABLE IF NOT EXISTS generator_message_cache(
-                id INTEGER PRIMARY KEY,
-                channel_id INTEGER NOT NULL,
-                content TEXT NOT NULL
-            )
-        """)
-        self.cursor.execute("""
-            CREATE TABLE IF NOT EXISTS guild_generative_config(
-                id INTEGER PRIMARY KEY,
-                enabled BOOLEAN NOT NULL,
-                temperature REAL NOT NULL,
-                max_words INTEGER NOT NULL,
-                auto_cache BOOLEAN NOT NULL,
-                message_probability REAL NOT NULL
-            )
-        """)
-        self.conn.commit()
+        self.db = bot.database
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -45,36 +25,32 @@ class Generative(commands.Cog):
         if message.author == self.bot.user:
             return
         
-        gen_config = self.cursor.execute(
-                "SELECT * FROM guild_generative_config WHERE id = ?", (message.guild.id,)
-            ).fetchone()
-        id, enabled, temperature, max_words, auto_cache = gen_config if gen_config else (message.guild.id, False, 1.5, 100, False)
+        gen_config = self.db.gen_fetch_guild_config(message.guild.id)
+        enabled = gen_config["enabled"]
+        temperature = gen_config["temperature"]
+        max_words = gen_config["max_words"]
+        auto_cache = gen_config["auto_cache"]
+        message_probability = gen_config["message_probability"]
 
         if not enabled:
             return
         
         if auto_cache:
-            self.cursor.execute(
-                "INSERT OR IGNORE INTO generator_message_cache (id, channel_id, content) VALUES (?, ?, ?)", (message.id, message.channel.id, message.content,)
-            )
-            self.conn.commit()
+            self.db.gen_cache_message(message.id, message.channel.id, message.content)
 
-        if self.bot.user in message.mentions or random.random() < 0.002:
+        if self.bot.user in message.mentions or random.random() < message_probability:
             generated_message = self.generate_message(message.channel.id, max_words, temperature)
-            await message.channel.send(generated_message, allowed_mentions=discord.AllowedMentions.none())
-            self.logger.debug("Generated message sent")
+            if generated_message:
+                await message.channel.send(generated_message, allowed_mentions=discord.AllowedMentions.none())
+                self.logger.debug("Generated message sent")
 
 
     def generate_message(self, channel_id, max_words, temperature):
-        messages = []
+        messages = self.db.gen_fetch_cached_message_content(channel_id)
 
-        self.cursor.execute(
-            "SELECT content FROM generator_message_cache WHERE channel_id = ?",
-            (channel_id,)
-        )
-        rows = self.cursor.fetchall()
-        for row in rows:
-            messages.append(row[0])
+        if messages is None or len(messages) < 3:
+            self.logger.debug("Not enough messages to generate from")
+            return None
 
         trigram_counts = self.build_trigram_counts(messages)
         trigram_probs = self.convert_to_probabilities(trigram_counts)
@@ -114,57 +90,47 @@ class Generative(commands.Cog):
 
         return generated_message
 
+
     @app_commands.command(name="cache_messages", description="Cache messages in this channel for message generation")
-    async def cache_messages_command(self, interaction: discord.Interaction, force: bool = False):
+    async def cache_messages_command(self, interaction: discord.Interaction, forced: bool = False):
         await interaction.response.send_message("Caching messages in this channel...", ephemeral=True)
-        await self.cache_channel(interaction.channel, force)
-        await interaction.followup.send("Message caching complete!", ephemeral=True)
+        await self.cache_channel(interaction.channel, forced)
+        await interaction.followup.send("Finished caching messages in this channel!", ephemeral=True)
 
 
     async def cache_channel(self, channel: discord.TextChannel = None, forced: bool = False):
         self.logger.debug(f"Starting message caching for channel: {channel.id}")
 
-        self.cursor.execute(
-            "SELECT MAX(id) FROM generator_message_cache WHERE channel_id = ?",
-            (channel.id,)
-        )
-        result = self.cursor.fetchone()
-        id = result[0]
+        if forced:
+            self.logger.debug("Forced caching enabled, clearing existing cache for channel")
+            self.db.gen_clear_channel_cache(channel.id)
 
-        self.logger.debug(f"Last cached message ID for channel {channel.id}: {id}")
+        last_cached_message = self.db.gen_fetch_last_cached_message(channel.id)
+
+        self.logger.debug(f"Last cached message ID: {last_cached_message}")
+
+        after = None
+        if last_cached_message:
+            after = discord.Object(id=last_cached_message)
+
+        self.logger.debug(f"Fetching messages after: {after}")
         
-
-        async for msg in channel.history(limit=None, after=None if forced else id, oldest_first=True):
-            if msg.author.bot:
+        async for message in channel.history(limit=None, oldest_first=True, after=after):
+            if message.author.bot:
                 continue
-            
-            self.cursor.execute(
-                "INSERT OR IGNORE INTO generator_message_cache (id, channel_id, content) VALUES (?, ?, ?)",
-                (msg.id, channel.id, msg.content)
-            )
-            self.conn.commit()
-
-        self.logger.info(f"Cached messages for channel {channel.id}")
+            self.db.gen_cache_message(message.id, channel.id, message.content)
+        
+        self.logger.debug("Finished caching messages for channel")
 
 
     @app_commands.checks.has_permissions(manage_messages=True)
-    @app_commands.command(name="delete_cache", description="Deletes the message generation cache for this channel")
+    @app_commands.command(name="clear_cache", description="Clears the message generation cache for this channel")
     async def delete_cache_command(self, interaction: discord.Interaction, channel: discord.TextChannel = None):
-        if interaction.user.guild_permissions.manage_messages == False:
-            await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
-            return
-
-        if channel == None:
+        if channel is None:
             channel = interaction.channel
 
-        self.cursor.execute(
-            "DELETE FROM generator_message_cache WHERE channel_id = ?",
-            (channel.id,)
-        )
-        self.conn.commit()
-
-        self.logger.info(f"Deleted message generation cache for channel: {channel.id}")
-        await interaction.response.send_message("Deleted message generation cache", ephemeral=True)
+        self.db.gen_clear_channel_cache(channel.id)
+        await interaction.response.send_message(f"Deleted message cache for {channel.mention}", ephemeral=True)
 
 
     @app_commands.checks.has_permissions(manage_guild=True)
@@ -181,19 +147,12 @@ class Generative(commands.Cog):
             return
 
         if option == None or value == None:
-            self.cursor.execute(
-                "SELECT * FROM guild_generative_config WHERE id = ?", (interaction.guild.id,)
-            )
-            row = self.cursor.fetchone()
-            if row is None:
-                self.cursor.execute(
-                    "INSERT INTO guild_generative_config (id, enabled, temperature, max_words, auto_cache, message_probability) VALUES (?, ?, ?, ?, ?, ?)",
-                    (interaction.guild.id, False, 1.5, 100, False, 0.002)
-                )
-                row = (interaction.guild.id, False, 1.5, 100, False, 0.002)
-                self.conn.commit()
-
-            guild_id, enabled, temperature, max_words, auto_cache, message_probability = row
+            config = self.db.gen_fetch_guild_config(interaction.guild.id)
+            enabled = config["enabled"]
+            temperature = config["temperature"]
+            max_words = config["max_words"]
+            auto_cache = config["auto_cache"]
+            message_probability = config["message_probability"]
 
             embed = discord.Embed(
                 title="Message Gen Config",
@@ -221,11 +180,7 @@ class Generative(commands.Cog):
             await interaction.response.send_message("Invalid option.", ephemeral=True)
             return
         
-        self.cursor.execute(
-            f"UPDATE guild_generative_config SET {option} = ? WHERE id = ?",
-            (value, interaction.guild.id)
-        )
-        self.conn.commit()
+        self.db.gen_update_guild_config(interaction.guild.id, option, value)
         
         await interaction.response.send_message(f"Set `{option}` to `{value}`", ephemeral=True)
 

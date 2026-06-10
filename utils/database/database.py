@@ -3,26 +3,23 @@ import os
 import json
 
 class DBManager:
-
-
     def __init__(self):
         self.conn = sqlite3.connect('test_data.db')
         self.conn.row_factory = sqlite3.Row
         self.cursor = self.conn.cursor()
 
+        self.init_tables()
+
         return None
 
 
     def init_tables(self):
-        for file in os.listdir('sql'):
+        for file in os.listdir('./utils/database/sql'):
             if file.endswith('.sql'):
-                reqs = ""
-                with open(file, 'r') as l:
-                    reqs = l.readlines()
-                self.cursor.execute(reqs)
+                with open(f'./utils/database/sql/{file}', 'r') as f:
+                    sql = f.read()
+                    self.cursor.executescript(sql)
         self.conn.commit()
-
-        return None
 
 
     def insert_reminder(self, user_id, channel_id, label, remind_at, daily_remind_at, send_dm):
@@ -123,4 +120,53 @@ class DBManager:
             self.cursor.execute("UPDATE connect_four SET turn = ?, grid = ? WHERE game_id = ?", (next_turn, json.dumps(grid), game["game_id"]))
         else:
             self.cursor.execute("DELETE FROM connect_four WHERE game_id = ?", (game["game_id"],))
+        self.conn.commit()
+
+
+    def gen_fetch_guild_config(self, guild_id):
+        config = self.cursor.execute("SELECT * FROM guild_generative_config WHERE id = ?", (guild_id,)).fetchone()
+        if config is None:
+            self.cursor.execute("INSERT INTO guild_generative_config (id, enabled, temperature, max_words, auto_cache, message_probability) VALUES (?, ?, ?, ?, ?, ?)", (guild_id, False, 1.0, 50, False, 0.01))
+            self.conn.commit()
+            return self.cursor.execute("SELECT * FROM guild_generative_config WHERE id = ?", (guild_id,)).fetchone()
+        return config
+    
+
+    def gen_update_guild_config(self, guild_id, option, value):
+        self.cursor.execute(f"UPDATE guild_generative_config SET {option} = ? WHERE id = ?", (value, guild_id))
+        self.conn.commit()
+    
+    
+    def gen_cache_message(self, message_id, channel_id, content):
+        self.cursor.execute(
+                "INSERT OR IGNORE INTO generator_message_cache (id, channel_id, content) VALUES (?, ?, ?)", (message_id, channel_id, content,)
+            )
+        self.conn.commit()
+
+
+    def gen_fetch_cached_message_content(self, channel_id):
+        self.cursor.execute(
+            "SELECT content FROM generator_message_cache WHERE channel_id = ?",
+            (channel_id,)
+        )
+        rows = self.cursor.fetchall()
+        if not rows:
+            return []
+        return [row["content"] for row in rows]
+    
+
+    def gen_fetch_last_cached_message(self, channel_id):
+        self.cursor.execute(
+            "SELECT MAX(id) FROM generator_message_cache WHERE channel_id = ?",
+            (channel_id,)
+        )
+        result = self.cursor.fetchone()
+        return result[0] if result and result[0] is not None else None
+    
+
+    def gen_clear_channel_cache(self, channel_id):
+        self.cursor.execute(
+            "DELETE FROM generator_message_cache WHERE channel_id = ?",
+            (channel_id,)
+        )
         self.conn.commit()

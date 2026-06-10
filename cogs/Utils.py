@@ -208,30 +208,6 @@ class Utils(commands.Cog):
             await interaction.response.send_message(f"An error occurred: {e}", ephemeral=True)
 
 
-    @app_commands.command(name="object", description="Sends a random object with NCS music")
-    async def object(self, interaction: discord.Interaction, 
-                    query: str=None):
-        try:
-            path = "./assets/Objects on NCS Music"
-
-            video_files = [file for file in os.listdir(path)]
-
-            if query is not None:
-                matching_videos = [file for file in video_files if f"{query}." in file]
-                if not matching_videos:
-                    await interaction.response.send_message(f"No object has been found. Try entering (1-1000)", ephemeral=True)
-                    return
-                selected_video = matching_videos[0]
-            else:
-                selected_video = random.choice(video_files)
-
-            video_path = os.path.join(path, selected_video)
-
-            await interaction.response.send_message(selected_video[:-4], file=discord.File(video_path))
-        except Exception as e:
-            self.logger.error(e)
-
-
     @app_commands.command(name="meter", description="Create a random meter")
     async def meter(self, interaction: discord.Interaction, 
                     user: discord.User, meter: str):
@@ -255,7 +231,7 @@ class Utils(commands.Cog):
 
     async def translate_context_menu(self, interaction: discord.Interaction, message: discord.Message):
         result = self.deepl_client.translate_text(message.content, target_lang="EN-US")
-        await interaction.response.send_message(result.text, ephemeral=True)
+        await interaction.response.send_message(f"`Translated from {result.detected_source_lang}`\n{result.text}", ephemeral=True)
 
 
     # @app_commands.checks.bot_has_permissions(manage_messages=True, manage_webhooks=True)
